@@ -113,7 +113,7 @@
         const subKey = getSubVideoKey(subEl);
         const scope = capturePlaybackScope(subEl);
         const generation = completionReplayGeneration;
-        const startedAt = Date.now();
+        let startedAt = Date.now();
         let record = null;
         learningRecordPending = true;
         state.isSwitching = true;
@@ -225,7 +225,7 @@
         const generation = ++completionReplayGeneration;
         const scope = capturePlaybackScope(subEl);
         const stillCurrent = () => generation === completionReplayGeneration && isPlaybackScopeCurrent(scope);
-        const startedAt = Date.now();
+        let startedAt = Date.now();
         let playAttempts = 0;
         let requestId = 0;
         let settled = false;
@@ -248,7 +248,10 @@
                 currentTime: video.currentTime, targetTime, seeking: video.seeking,
                 readyState: video.readyState, paused: video.paused, playAttempts,
             });
-            pauseAutomation(`「${title}」${reason}，已暂停；请检查播放器和网络。`);
+            const minimizeHint = (state.lastMinimizationRestoredAt && (Date.now() - state.lastMinimizationRestoredAt < 300000))
+                ? '（检测到窗口曾被最小化休眠，请保持窗口展开）'
+                : '';
+            pauseAutomation(`「${title}」${reason}${minimizeHint}，已暂停；请检查播放器和网络。`);
         };
         const finish = () => {
             if (!isPending()) return;
@@ -278,6 +281,10 @@
         };
         const waitAndPlay = () => {
             if (!isPending()) return;
+            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
+            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
+                startedAt = Date.now();
+            }
             if (Date.now() - startedAt >= CONFIG.replayStartTimeout) {
                 fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
                 return;

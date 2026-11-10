@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         神奇海螺
 // @namespace    https://github.com/gddagdda89/magic_conch
-// @version      1.8.4
+// @version      1.8.5
 // @description  易知与江南金培课程学习助手，自动识别平台，支持课程连播与学习状态检查
 // @author       gddagdda89
 // @license      MIT
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = '1.8.4';
+const SCRIPT_VERSION = '1.8.5';
 
     function detectPlatform(url) {
         return /^https:\/\/jnftc\.jnbank\.com\.cn(?:\/|$)/i.test(url) ? 'jnftc' : 'yizhi';
@@ -28,7 +28,7 @@ const SCRIPT_VERSION = '1.8.4';
     const IS_JNFTC = PLATFORM === 'jnftc';
     const PLATFORM_NAME = IS_JNFTC ? '江南金培' : '易知';
 
-    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.4】脚本初始化启动...");
+    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.5】脚本初始化启动...");
 
     // 配置项
     const CONFIG = {
@@ -468,6 +468,11 @@ function getStorageItem(keyName, legacyKey) {
         lastJumpTime: 0,
         lastTabSpawnTime: 0,       // 并发子窗口唤起防抖节流
         remoteVersion: '',         // 远程检测到的最新版本号
+        minimizedAlertText: '',    // 窗口最小化/后台恢复警告提示
+        minimizedAt: 0,            // 进入最小化/后台的时间戳
+        lastMinimizationDurationSec: 0, // 最近一次最小化持续秒数
+        lastMinimizationRestoredAt: 0,  // 最近一次从最小化恢复的时间戳
+        isCurrentlyMinimized: false,
     };
 
     const COURSE_OUTCOME_PREFIX = '_kme_course_outcome_';
@@ -1645,7 +1650,7 @@ function createHUD() {
                     <div id="jinpei-hud-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${dotBg}; animation: ${dotAnim}; flex-shrink: 0; ${isCollapsed ? 'position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95); z-index: 2;' : ''}"></div>
                     <span id="jinpei-hud-icon" style="font-size: ${isCollapsed ? '21px' : '14px'}; flex-shrink: 0; line-height: 1;" title="${isCollapsed ? '点击展开神奇海螺' : ''}">🐚</span>
                     <span id="jinpei-hud-title-text" style="font-weight: 600; font-size: 13px; color: #0f172a; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline'};">神奇海螺</span>
-                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.4</span>
+                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.5</span>
                     <a id="jinpei-hud-update-badge" href="${CONFIG.updateUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 10px; color: #ffffff; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 1px 6px; border-radius: 4px; font-weight: 600; text-decoration: none; white-space: nowrap; flex-shrink: 0; display: ${hasUpdate && !isCollapsed ? 'inline-block' : 'none'}; cursor: pointer; animation: jinpei-pulse 2s infinite ease-in-out; margin-left: 2px;" title="${hasUpdate ? `发现新版本 v${state.remoteVersion}，点击跳转更新` : '更新'}">更新 v${state.remoteVersion || ''}</a>
                 </div>
                 <div id="jinpei-hud-header-right" style="display: ${isCollapsed ? 'none' : 'flex'}; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap;">
@@ -1657,6 +1662,16 @@ function createHUD() {
             <!-- 主体内容卡片 -->
             <div id="jinpei-hud-body" style="display: ${isCollapsed ? 'none' : 'block'}; padding: 12px 14px 14px 14px;">
                 <div style="font-size:11px;color:#64748b;margin-bottom:8px;">当前平台：${PLATFORM_NAME}</div>
+                <!-- 最小化警示条 -->
+                <div id="jinpei-minimize-alert-row" style="display: ${state.minimizedAlertText ? 'block' : 'none'}; margin-bottom: 8px; font-size: 11px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 7px 9px; line-height: 1.5; box-shadow: 0 1px 3px rgba(217, 119, 6, 0.08); white-space: normal !important; word-break: break-word; overflow-wrap: break-word;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px;">
+                        <span style="font-weight: 700; color: #b45309; display: flex; align-items: center; gap: 4px; white-space: nowrap;">
+                            <span>⚠️</span> <span>窗口曾被最小化</span>
+                        </span>
+                        <button id="jinpei-minimize-alert-close" type="button" style="width: 18px; height: 18px; line-height: 1; font-size: 14px; color: #b45309; border: none; background: transparent; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;" title="关闭提示">×</button>
+                    </div>
+                    <div id="jinpei-minimize-alert-text" style="color: #92400e; font-size: 10.5px; white-space: normal !important; word-break: break-word; overflow-wrap: break-word; line-height: 1.5;">${state.minimizedAlertText || ''}</div>
+                </div>
                 <!-- 快捷启动/暂停按键 -->
                 <button id="jinpei-toggle-btn" class="jinpei-btn-action" style="
                     width: 100%;
@@ -1845,7 +1860,28 @@ function createHUD() {
         getHUDElement('jinpei-task-clear').addEventListener('click', () => {
             if (!state.enabled) { saveTaskSelection({ mode: 'ids', ids: [] }); renderTaskSelection(true); }
         });
+        const minimizeAlertCloseBtn = getHUDElement('jinpei-minimize-alert-close');
+        if (minimizeAlertCloseBtn) {
+            minimizeAlertCloseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                state.minimizedAlertText = '';
+                const alertRow = getHUDElement('jinpei-minimize-alert-row');
+                if (alertRow) alertRow.style.display = 'none';
+                clampHUDPosition();
+            });
+        }
         updateOutcomeHUD();
+
+        const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
+        const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');
+        if (minimizeAlertRow && minimizeAlertTextEl) {
+            if (state.minimizedAlertText) {
+                minimizeAlertRow.style.display = 'block';
+                minimizeAlertTextEl.innerText = state.minimizedAlertText;
+            } else {
+                minimizeAlertRow.style.display = 'none';
+            }
+        }
 
         // 边界吸附与溢出校正：保证 HUD 在折叠、展开或窗口缩放时始终完整可见不换行
         function clampHUDPosition() {
@@ -2203,6 +2239,17 @@ function createHUD() {
         if (courseTotalPercent !== undefined) state.courseTotalPercent = courseTotalPercent;
         updateOutcomeHUD();
 
+        const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
+        const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');
+        if (minimizeAlertRow && minimizeAlertTextEl) {
+            if (state.minimizedAlertText) {
+                minimizeAlertRow.style.display = 'block';
+                minimizeAlertTextEl.innerText = state.minimizedAlertText;
+            } else {
+                minimizeAlertRow.style.display = 'none';
+            }
+        }
+
         const statusEl = getHUDElement('jinpei-hud-status');
         const taskRow = getHUDElement('jinpei-hud-task-row');
         const taskEl = getHUDElement('jinpei-hud-task');
@@ -2358,12 +2405,93 @@ function createHUD() {
 // ==========================================
     // 2. 防暂停与防后台挂机机制（动态联动：运行生效，暂停释放）
     // ==========================================
+    let nativeHiddenGetter = null;
+    let nativeVisibilityGetter = null;
+
+    function getNativeHidden() {
+        try {
+            if (typeof nativeHiddenGetter === 'function') return Boolean(nativeHiddenGetter());
+        } catch (_) {}
+        return typeof document !== 'undefined' ? Boolean(document.hidden) : false;
+    }
+
+    function getNativeVisibilityState() {
+        try {
+            if (typeof nativeVisibilityGetter === 'function') return String(nativeVisibilityGetter());
+        } catch (_) {}
+        return typeof document !== 'undefined' ? String(document.visibilityState || 'visible') : 'visible';
+    }
+
+    function formatMinimizationDuration(sec) {
+        if (sec < 60) return `${sec} 秒`;
+        const mins = Math.floor(sec / 60);
+        const rem = sec % 60;
+        return rem > 0 ? `${mins} 分 ${rem} 秒` : `${mins} 分钟`;
+    }
+
+    function handleMinimizationChange() {
+        if (typeof document === 'undefined') return;
+        const isHidden = getNativeHidden() || getNativeVisibilityState() === 'hidden';
+        state.isCurrentlyMinimized = isHidden;
+
+        if (isHidden) {
+            if (!state.minimizedAt) {
+                state.minimizedAt = Date.now();
+                diagnosticConsole.log("【神奇海螺】检测到窗口进入最小化/后台隐藏状态...");
+            }
+        } else {
+            if (state.minimizedAt) {
+                const durationSec = Math.round((Date.now() - state.minimizedAt) / 1000);
+                state.minimizedAt = 0;
+                state.lastMinimizationDurationSec = durationSec;
+                state.lastMinimizationRestoredAt = Date.now();
+
+                // 唤醒看门狗时间戳，避免恢复瞬间误判卡死
+                if (typeof watchdogRuntime !== 'undefined' && watchdogRuntime) {
+                    watchdogRuntime.lastProgressTimestamp = Date.now();
+                }
+
+                // 仅当挂起 3 秒以上且处于运行状态时触发醒目提示
+                if (durationSec >= 3 && state.enabled) {
+                    const durText = formatMinimizationDuration(durationSec);
+                    const alertMsg = `检测到窗口在后台/最小化约 ${durText}。浏览器休眠会冻结心跳上报，易导致挂课失败或重播。建议：保持窗口展开挂课（切勿最小化到任务栏；可用 Win+Ctrl+D 虚拟桌面或被其他软件遮挡）。`;
+                    state.minimizedAlertText = alertMsg;
+                    diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从最小化恢复（后台挂起约 ${durText}）。浏览器底层已可能冻结视频或心跳上报，已在 HUD 提示避免最小化！`);
+                    if (typeof updateHUD === 'function') {
+                        updateHUD();
+                    }
+                }
+            }
+        }
+    }
+
+    function setupMinimizationMonitor() {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return;
+        if (typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', () => {
+                handleMinimizationChange();
+            }, true);
+        }
+        if (typeof window.addEventListener === 'function') {
+            window.addEventListener('focus', () => {
+                handleMinimizationChange();
+            }, true);
+            window.addEventListener('blur', () => {
+                handleMinimizationChange();
+            }, true);
+        }
+    }
+    setupMinimizationMonitor();
+
     function enableAntiPause() {
         try {
             const origHiddenDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden') || Object.getOwnPropertyDescriptor(document, 'hidden');
             const origVisibilityDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState') || Object.getOwnPropertyDescriptor(document, 'visibilityState');
             const origWebkitVisibilityDesc = Object.getOwnPropertyDescriptor(document, 'webkitVisibilityState') || Object.getOwnPropertyDescriptor(Document.prototype, 'webkitVisibilityState');
             const origWebkitVisibility = document.webkitVisibilityState;
+
+            nativeHiddenGetter = () => origHiddenDesc && origHiddenDesc.get ? origHiddenDesc.get.call(document) : (origHiddenDesc && 'value' in origHiddenDesc ? origHiddenDesc.value : false);
+            nativeVisibilityGetter = () => origVisibilityDesc && origVisibilityDesc.get ? origVisibilityDesc.get.call(document) : (origVisibilityDesc && 'value' in origVisibilityDesc ? origVisibilityDesc.value : 'visible');
 
             // 仅在 state.enabled 为 true 时伪装前台可见，暂停时返回浏览器原生状态
             Object.defineProperty(document, 'hidden', {
@@ -2393,6 +2521,7 @@ function createHUD() {
                 if (state.enabled) e.stopImmediatePropagation();
             }, true);
             document.addEventListener('visibilitychange', (e) => {
+                handleMinimizationChange();
                 if (state.enabled) e.stopImmediatePropagation();
             }, true);
 
@@ -2946,7 +3075,7 @@ function createHUD() {
         const subKey = getSubVideoKey(subEl);
         const scope = capturePlaybackScope(subEl);
         const generation = completionReplayGeneration;
-        const startedAt = Date.now();
+        let startedAt = Date.now();
         let record = null;
         learningRecordPending = true;
         state.isSwitching = true;
@@ -3058,7 +3187,7 @@ function createHUD() {
         const generation = ++completionReplayGeneration;
         const scope = capturePlaybackScope(subEl);
         const stillCurrent = () => generation === completionReplayGeneration && isPlaybackScopeCurrent(scope);
-        const startedAt = Date.now();
+        let startedAt = Date.now();
         let playAttempts = 0;
         let requestId = 0;
         let settled = false;
@@ -3081,7 +3210,10 @@ function createHUD() {
                 currentTime: video.currentTime, targetTime, seeking: video.seeking,
                 readyState: video.readyState, paused: video.paused, playAttempts,
             });
-            pauseAutomation(`「${title}」${reason}，已暂停；请检查播放器和网络。`);
+            const minimizeHint = (state.lastMinimizationRestoredAt && (Date.now() - state.lastMinimizationRestoredAt < 300000))
+                ? '（检测到窗口曾被最小化休眠，请保持窗口展开）'
+                : '';
+            pauseAutomation(`「${title}」${reason}${minimizeHint}，已暂停；请检查播放器和网络。`);
         };
         const finish = () => {
             if (!isPending()) return;
@@ -3111,6 +3243,10 @@ function createHUD() {
         };
         const waitAndPlay = () => {
             if (!isPending()) return;
+            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
+            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
+                startedAt = Date.now();
+            }
             if (Date.now() - startedAt >= CONFIG.replayStartTimeout) {
                 fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
                 return;
@@ -4969,6 +5105,9 @@ let jnReportPromise = null;
     function mainLoop() {
         if (!syncAccountContext()) return;
         syncRetryEpoch();
+        if (typeof handleMinimizationChange === 'function' && !getNativeHidden() && state.minimizedAt) {
+            handleMinimizationChange();
+        }
         createHUD();
         renderTaskSelection();
         if (IS_JNFTC) { updateHUD(); return handleJnPlatform(); }
@@ -5019,6 +5158,6 @@ let jnReportPromise = null;
     setTimeout(mainLoop, 1000);
     checkScriptUpdate().catch(() => {});
 
-    recordDiagnostic('INFO', '脚本初始化 v1.8.4，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
+    recordDiagnostic('INFO', '脚本初始化 v1.8.5，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
 
 })();

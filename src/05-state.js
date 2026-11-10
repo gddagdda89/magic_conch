@@ -31,6 +31,11 @@
         lastJumpTime: 0,
         lastTabSpawnTime: 0,       // 并发子窗口唤起防抖节流
         remoteVersion: '',         // 远程检测到的最新版本号
+        minimizedAlertText: '',    // 窗口最小化/后台恢复警告提示
+        minimizedAt: 0,            // 进入最小化/后台的时间戳
+        lastMinimizationDurationSec: 0, // 最近一次最小化持续秒数
+        lastMinimizationRestoredAt: 0,  // 最近一次从最小化恢复的时间戳
+        isCurrentlyMinimized: false,
     };
 
     const COURSE_OUTCOME_PREFIX = '_kme_course_outcome_';

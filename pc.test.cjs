@@ -45,14 +45,25 @@ function setup(initialStorage = [], initialLocalStorage = [], shared = {}) {
     const fixture = { video, items: [current, next], courses: [], catalogClicks: 0 };
     const hud = new Map();
     const catalog = { innerText: '学习目录', children: [], closest() { return { click() { fixture.catalogClicks++; } }; } };
+    let mockNativeHidden = true;
+    let mockNativeVisibilityState = 'hidden';
     class Document {
         createElement() { return { style: {}, append() {}, appendChild() {}, addEventListener() {} }; }
-        get hidden() { return true; }
-        get visibilityState() { return 'hidden'; }
-        get webkitVisibilityState() { return 'hidden'; }
+        get hidden() { return mockNativeHidden; }
+        get visibilityState() { return mockNativeVisibilityState; }
+        get webkitVisibilityState() { return mockNativeVisibilityState; }
         addEventListener() {}
         getElementById(id) {
-            if (!hud.has(id)) hud.set(id, { style: {}, innerText: '', addEventListener() {}, appendChild() {}, title: '' });
+            if (id === '_kme_tool_host' || id === 'jinpei-hud') {
+                return hud.get(id) || null;
+            }
+            if (!hud.has(id)) hud.set(id, {
+                style: {}, innerText: '', title: '',
+                listeners: {},
+                addEventListener(event, fn) { (this.listeners[event] = this.listeners[event] || []).push(fn); },
+                click() { (this.listeners['click'] || []).forEach(fn => fn({ stopPropagation() {} })); },
+                appendChild() {}
+            });
             return hud.get(id);
         }
         querySelector(selector) { return selector === 'video' ? fixture.video : null; }
@@ -81,7 +92,7 @@ function setup(initialStorage = [], initialLocalStorage = [], shared = {}) {
     };
     vm.createContext(context);
     const source = fs.readFileSync(path.join(__dirname, 'pc.js'), 'utf8');
-    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare }; })();'), context);
+    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare, handleMinimizationChange, formatMinimizationDuration, getHUDElement, createHUD }; })();'), context);
     timers.clear(); // 初始化主循环由测试显式调用。
     function advance(ms) {
         const end = now + ms;
@@ -92,7 +103,8 @@ function setup(initialStorage = [], initialLocalStorage = [], shared = {}) {
         }
         now = end;
     }
-    return { ...context.window.testApi, context, fixture, current, next, advance, timers, storage, localStorageMap, openedUrls };
+    return { ...context.window.testApi, context, fixture, current, next, advance, timers, storage, localStorageMap, openedUrls,
+        setMockVisibility: (hidden, vState) => { mockNativeHidden = hidden; mockNativeVisibilityState = vState; } };
 }
 
 const settleLocks = () => new Promise(resolve => setImmediate(resolve));
@@ -2210,10 +2222,20 @@ test('[防检测 4] Shadow DOM 隔离：HUD 挂载至 _kme_tool_host 且内部 S
         children: [],
         appendChild(child) { this.children.push(child); }
     };
+    const hudElements = new Map();
     t.context.document.getElementById = (id) => {
         if (id === '_kme_tool_host') return null;
         if (id === 'jinpei-hud') return null;
-        return { style: {}, innerText: '', addEventListener() {}, appendChild() {} };
+        if (!hudElements.has(id)) {
+            hudElements.set(id, {
+                style: {}, innerText: '', title: '',
+                listeners: {},
+                addEventListener(event, fn) { (this.listeners[event] = this.listeners[event] || []).push(fn); },
+                click() { (this.listeners['click'] || []).forEach(fn => fn({ stopPropagation() {} })); },
+                appendChild() {}
+            });
+        }
+        return hudElements.get(id);
     };
     t.context.document.createElement = (tag) => {
         if (tag === 'div') {
@@ -2491,10 +2513,20 @@ function renderHUDTest(storageInit = []) {
         children: [],
         appendChild(child) { this.children.push(child); }
     };
+    const hudElements = new Map();
     t.context.document.getElementById = (id) => {
         if (id === '_kme_tool_host') return null;
         if (id === 'jinpei-hud') return null;
-        return { style: {}, innerText: '', addEventListener() {}, appendChild() {} };
+        if (!hudElements.has(id)) {
+            hudElements.set(id, {
+                style: {}, innerText: '', title: '',
+                listeners: {},
+                addEventListener(event, fn) { (this.listeners[event] = this.listeners[event] || []).push(fn); },
+                click() { (this.listeners['click'] || []).forEach(fn => fn({ stopPropagation() {} })); },
+                appendChild() {}
+            });
+        }
+        return hudElements.get(id);
     };
     t.context.document.createElement = (tag) => {
         if (tag === 'div') {
@@ -2590,4 +2622,54 @@ test('[后台 Worker 防休眠] 支持创建定时调度器并在不支持 Worke
     assert.ok(timer.type === 'interval' || timer.type === 'worker', '句柄类型应为 worker 或 interval 回退');
 
     timer.clear();
+});
+
+test('[防最小化 1] 窗口最小化后恢复时，在 HUD 显示警示横幅并记录诊断日志', async () => {
+    const { t, getShadowRoot } = renderHUDTest([['_kme_pref_col', 'false']]);
+    t.setMockVisibility(false, 'visible');
+
+    t.advance(20000);
+    t.state.enabled = true;
+    t.state.minimizedAt = t.context.Date.now() - 15000; // 15秒前进入最小化
+    t.handleMinimizationChange();
+
+    assert.ok(t.state.minimizedAlertText.includes('15 秒'));
+    assert.equal(t.state.minimizedAt, 0);
+    assert.equal(t.state.lastMinimizationDurationSec, 15);
+
+    await t.mainLoop();
+    const shadow = getShadowRoot();
+    const hud = shadow.children.find(c => c.id === 'jinpei-hud');
+    assert.ok(hud);
+    assert.match(hud.innerHTML, /id="jinpei-minimize-alert-row"[^>]*display:\s*block/);
+    assert.match(hud.innerHTML, /white-space:\s*normal/);
+    assert.match(hud.innerHTML, /word-break:\s*break-word/);
+    assert.match(hud.innerHTML, /窗口曾被最小化/);
+    assert.match(hud.innerHTML, /15 秒/);
+});
+
+test('[防最小化 2] 点击最小化警示条关闭按钮可清除并隐藏警示条', async () => {
+    const { t } = renderHUDTest([['_kme_pref_col', 'false']]);
+    t.state.minimizedAlertText = '检测到窗口最小化';
+    await t.mainLoop();
+    assert.equal(t.state.minimizedAlertText, '检测到窗口最小化');
+
+    const closeBtn = t.getHUDElement('jinpei-minimize-alert-close');
+    assert.ok(closeBtn);
+    assert.equal(typeof closeBtn.click, 'function');
+    closeBtn.click();
+    assert.equal(t.state.minimizedAlertText, '');
+});
+
+test('[防最小化 3] 窗口从最小化恢复后更新看门狗时间戳并提供友好故障提示', () => {
+    const t = setup();
+    t.setMockVisibility(false, 'visible');
+
+    t.advance(70000);
+    t.state.enabled = true;
+    t.state.minimizedAt = t.context.Date.now() - 65000; // 1分5秒
+    t.handleMinimizationChange();
+
+    assert.ok(t.state.minimizedAlertText.includes('1 分 5 秒'));
+    assert.ok(t.state.lastMinimizationRestoredAt > 0);
 });
