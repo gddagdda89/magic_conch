@@ -108,7 +108,7 @@
                     <div id="jinpei-hud-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${dotBg}; animation: ${dotAnim}; flex-shrink: 0; ${isCollapsed ? 'position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95); z-index: 2;' : ''}"></div>
                     <span id="jinpei-hud-icon" style="font-size: ${isCollapsed ? '21px' : '14px'}; flex-shrink: 0; line-height: 1;" title="${isCollapsed ? '点击展开神奇海螺' : ''}">🐚</span>
                     <span id="jinpei-hud-title-text" style="font-weight: 600; font-size: 13px; color: #0f172a; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline'};">神奇海螺</span>
-                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.7</span>
+                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.8</span>
                     <a id="jinpei-hud-update-badge" href="${CONFIG.updateUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 10px; color: #ffffff; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 1px 6px; border-radius: 4px; font-weight: 600; text-decoration: none; white-space: nowrap; flex-shrink: 0; display: ${hasUpdate && !isCollapsed ? 'inline-block' : 'none'}; cursor: pointer; animation: jinpei-pulse 2s infinite ease-in-out; margin-left: 2px;" title="${hasUpdate ? `发现新版本 v${state.remoteVersion}，点击跳转更新` : '更新'}">更新 v${state.remoteVersion || ''}</a>
                 </div>
                 <div id="jinpei-hud-header-right" style="display: ${isCollapsed ? 'none' : 'flex'}; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap;">
@@ -143,6 +143,29 @@
                     <span id="jinpei-btn-icon">${btnIcon}</span>
                     <span id="jinpei-btn-text">${btnText}</span>
                 </button>
+
+                <!-- 后台防休眠状态胶囊指示器 -->
+                <div id="jinpei-keepalive-badge" style="
+                    display: ${state.enabled ? 'flex' : 'none'};
+                    align-items: center;
+                    justify-content: center;
+                    gap: 5px;
+                    padding: 5px 9px;
+                    margin-bottom: 9px;
+                    border-radius: 8px;
+                    font-size: 10.5px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    user-select: none;
+                    text-align: center;
+                    line-height: 1.35;
+                    background: rgba(245, 158, 11, 0.1);
+                    border: 1px solid rgba(245, 158, 11, 0.35);
+                    color: #b45309;
+                    cursor: pointer;
+                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！">
+                    <span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>
+                </div>
 
                 <!-- 浅色磨砂信息栏 -->
                 <div class="jinpei-info-box" style="
@@ -328,7 +351,18 @@
                 clampHUDPosition();
             });
         }
+        const keepaliveBadge = getHUDElement('jinpei-keepalive-badge');
+        if (keepaliveBadge) {
+            keepaliveBadge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof startAudioKeepAlive === 'function') {
+                    startAudioKeepAlive();
+                }
+                updateKeepAliveBadge();
+            });
+        }
         updateOutcomeHUD();
+        updateKeepAliveBadge();
 
         const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
         const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');
@@ -687,6 +721,32 @@
         }
     }
 
+    function updateKeepAliveBadge() {
+        const badge = getHUDElement('jinpei-keepalive-badge');
+        if (!badge) return;
+        if (!state.enabled) {
+            badge.style.display = 'none';
+            return;
+        }
+        badge.style.display = 'flex';
+        const isActive = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
+        if (isActive) {
+            badge.style.background = 'rgba(16, 185, 129, 0.08)';
+            badge.style.border = '1px solid rgba(16, 185, 129, 0.25)';
+            badge.style.color = '#059669';
+            badge.style.cursor = 'default';
+            badge.title = '后台防休眠已全速生效：已获浏览器发声调度豁免，可放心最小化或切到后台虚拟桌面';
+            badge.innerHTML = '<span>🟢</span> <span>后台防休眠已生效（全频运行 · 可放心最小化）</span>';
+        } else {
+            badge.style.background = 'rgba(245, 158, 11, 0.1)';
+            badge.style.border = '1px solid rgba(245, 158, 11, 0.35)';
+            badge.style.color = '#b45309';
+            badge.style.cursor = 'pointer';
+            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！';
+            badge.innerHTML = '<span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>';
+        }
+    }
+
     function updateHUD(status, task, sub, progress, course, allCoursesProg, courseTotalProg, courseTotalPercent) {
         if (status) state.statusText = status;
         if (task !== undefined) state.currentTask = task;
@@ -697,6 +757,7 @@
         if (courseTotalProg !== undefined) state.courseTotalProgress = courseTotalProg;
         if (courseTotalPercent !== undefined) state.courseTotalPercent = courseTotalPercent;
         updateOutcomeHUD();
+        updateKeepAliveBadge();
 
         const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
         const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');

@@ -80,21 +80,25 @@
     }
 
     // ==========================================
-    // Web Audio 极微声波静音保活机制
+    // Web Audio 后台防休眠机制
     // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
-    // 产生真实 audible 特征（点亮标签页小喇叭），使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
+    // 产生真实 audible 发声特征，使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
     let keepAliveGainNode = null;
     let keepAliveGestureHooked = false;
     let hasLoggedRunning = false;
+    let hasLoggedSuspendedNotice = false;
 
     function reportAudioKeepAliveRunning() {
         if (!hasLoggedRunning) {
             hasLoggedRunning = true;
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                diagnosticConsole.log('【神奇海螺】Web Audio 保活已激活 (AudioContext: running，增益 0.002@30Hz，获得浏览器发声豁免免除后台节流)');
+                diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已激活 (AudioContext: running，增益 0.002@30Hz，已获浏览器调度豁免免除后台节流)');
+            }
+            if (typeof updateHUD === 'function') {
+                updateHUD();
             }
         }
     }
@@ -126,13 +130,14 @@
                 keepAliveOscillator = null;
                 keepAliveGainNode = null;
                 hasLoggedRunning = false;
+                hasLoggedSuspendedNotice = false;
             }
 
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
                 // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
-                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得 audible 豁免）
+                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得发声豁免）
                 gain.gain.value = 0.002;
                 osc.type = 'sine';
                 osc.frequency.value = 30;
@@ -147,19 +152,23 @@
                 reportAudioKeepAliveRunning();
             } else if (keepAliveAudioCtx.state === 'suspended') {
                 setupUserGestureResume();
+                if (!hasLoggedSuspendedNotice && typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                    hasLoggedSuspendedNotice = true;
+                    diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠就绪，当前等待手势激活 (点击 HUD 胶囊或页面任意处即可激活)');
+                }
                 keepAliveAudioCtx.resume().then(() => {
                     if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
                         reportAudioKeepAliveRunning();
                     }
                 }).catch((err) => {
                     if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                        diagnosticConsole.warn('【神奇海螺】Web Audio 保活处于挂起等待手势状态 (受浏览器自动播放策略限制，点击页面后自动激活):', err?.message || err);
+                        diagnosticConsole.warn('【神奇海螺】Web Audio 后台防休眠处于挂起等待手势状态 (受浏览器自动播放策略限制，与页面交互后自动激活):', err?.message || err);
                     }
                 });
             }
         } catch (err) {
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                diagnosticConsole.warn('【神奇海螺】Web Audio 保活启动受限:', err?.message || err);
+                diagnosticConsole.warn('【神奇海螺】Web Audio 后台防休眠启动受限:', err?.message || err);
             }
         }
     }
@@ -167,6 +176,7 @@
     function stopAudioKeepAlive() {
         keepAliveGestureHooked = false;
         hasLoggedRunning = false;
+        hasLoggedSuspendedNotice = false;
         try {
             if (keepAliveOscillator) {
                 try { keepAliveOscillator.stop(); } catch (_) {}
@@ -183,7 +193,10 @@
                 }
                 keepAliveAudioCtx = null;
                 if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                    diagnosticConsole.log('【神奇海螺】Web Audio 静音保活已释放');
+                    diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已释放');
+                }
+                if (typeof updateHUD === 'function') {
+                    updateHUD();
                 }
             }
         } catch (_) {}

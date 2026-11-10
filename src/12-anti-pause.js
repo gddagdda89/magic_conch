@@ -47,12 +47,19 @@
                     watchdogRuntime.lastProgressTimestamp = Date.now();
                 }
 
-                // 仅当挂起 3 秒以上且处于运行状态时触发醒目提示
+                // 仅当挂起 3 秒以上且处于运行状态时触发提示
                 if (durationSec >= 3 && state.enabled) {
                     const durText = formatMinimizationDuration(durationSec);
-                    const alertMsg = `检测到窗口在后台/最小化约 ${durText}。浏览器休眠会冻结心跳上报，易导致挂课失败或重播。建议：保持窗口展开挂课（切勿最小化到任务栏；可用 Win+Ctrl+D 虚拟桌面或被其他软件遮挡）。`;
-                    state.minimizedAlertText = alertMsg;
-                    diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从最小化恢复（后台挂起约 ${durText}）。浏览器底层已可能冻结视频或心跳上报，已在 HUD 提示避免最小化！`);
+                    const isAudioProtected = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
+                    if (isAudioProtected) {
+                        // 已经拥有后台防休眠发声豁免，免除浏览器后台节流，无需弹出刺眼的警告横幅
+                        state.minimizedAlertText = '';
+                        diagnosticConsole.log(`【神奇海螺】检测到窗口从后台恢复（后台约 ${durText}），后台防休眠持续生效中，心跳与定时器正常运行。`);
+                    } else {
+                        const alertMsg = `检测到窗口在后台约 ${durText}（后台防休眠尚未激活）。建议点击 HUD 激活防休眠胶囊，或保持窗口展开挂课。`;
+                        state.minimizedAlertText = alertMsg;
+                        diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从后台恢复（挂起约 ${durText}，防休眠未激活）。已在 HUD 提示激活防休眠！`);
+                    }
                     if (typeof updateHUD === 'function') {
                         updateHUD();
                     }

@@ -2211,7 +2211,7 @@ test('[防检测 4] Shadow DOM 隔离：HUD 挂载至 _kme_tool_host 且内部 S
             attachedShadowRoot = {
                 children: [],
                 appendChild(child) { this.children.push(child); },
-                getElementById(id) { return this.children.find(c => c.id === id) || null; },
+                getElementById(id) { return this.children.find(c => c.id === id) || t.context.document.getElementById(id); },
                 querySelector() { return null; }
             };
             return attachedShadowRoot;
@@ -2503,7 +2503,7 @@ function renderHUDTest(storageInit = []) {
             attachedShadowRoot = {
                 children: [],
                 appendChild(child) { this.children.push(child); },
-                getElementById(id) { return this.children.find(c => c.id === id) || null; },
+                getElementById(id) { return this.children.find(c => c.id === id) || t.context.document.getElementById(id); },
                 querySelector() { return null; }
             };
             return attachedShadowRoot;
@@ -2783,7 +2783,7 @@ test('[Web Audio 状态可靠上报] 处于 suspended 状态时绝不虚假上�
     assert.equal(currentFreq, 30, '振荡器频率必须符合 30Hz 超低频规范');
 
     const logsBefore = t.formatDiagnosticLogs();
-    assert.equal(logsBefore.includes('Web Audio 保活已激活'), false, '未真正 running 时绝不记录激活成功日志');
+    assert.equal(logsBefore.includes('后台防休眠已激活'), false, '未真正 running 时绝不记录激活成功日志');
 
     // 模拟用户手势交互唤醒：派发 click 事件
     assert.ok(windowListeners['click']?.length > 0, '必须注册 click 手势监听器');
@@ -2795,7 +2795,7 @@ test('[Web Audio 状态可靠上报] 处于 suspended 状态时绝不虚假上�
     // 唤醒后状态变为 running，且记录日志
     assert.equal(t.isAudioKeepAliveActive(), true, '唤醒后 isAudioKeepAliveActive 必须为 true');
     const logsAfter = t.formatDiagnosticLogs();
-    assert.ok(logsAfter.includes('Web Audio 保活已激活'), '唤醒后应记录激活成功日志');
+    assert.ok(logsAfter.includes('后台防休眠已激活'), '唤醒后应记录激活成功日志');
 });
 
 test('[金培整页跳转音频保活恢复] 金培整页跳转后 mainLoop 不被提前分支截断，能正常恢复音频保活', () => {
@@ -2826,4 +2826,68 @@ test('[金培整页跳转音频保活恢复] 金培整页跳转后 mainLoop 不�
     // 验证音频保活已在进入金培平台分支前成功启动
     assert.equal(started, true, '金培页面整页加载后 mainLoop 必须启动音频保活');
     assert.equal(t.isAudioKeepAliveActive(), true, '金培页面整页跳转后保活状态必须为 true');
+});
+
+test('[后台防休眠激活时免除警告] 只要后台防休眠已激活，从最小化/后台恢复时绝不弹窗警告，HUD 保持干净清爽', () => {
+    const t = setup();
+    class RunningAudioContext {
+        constructor() { this.state = 'running'; this.destination = {}; }
+        createOscillator() { return { type: '', frequency: { value: 0 }, connect() {}, start() {}, stop() {}, disconnect() {} }; }
+        createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; }
+        close() { return Promise.resolve(); }
+    }
+    t.context.window.AudioContext = RunningAudioContext;
+    t.startAudioKeepAlive();
+    assert.equal(t.isAudioKeepAliveActive(), true);
+
+    t.setMockVisibility(false, 'visible');
+    t.state.enabled = true;
+    t.state.minimizedAt = t.context.Date.now() - 30000; // 挂起 30 秒
+    t.handleMinimizationChange();
+
+    // 防休眠生效时，绝不弹出刺眼的黄色警示条！
+    assert.equal(t.state.minimizedAlertText, '', '已激活后台防休眠时不应生成最小化警告横幅');
+    const logs = t.formatDiagnosticLogs();
+    assert.ok(logs.includes('后台防休眠持续生效中'), '应记录安心的后台恢复正常推进日志');
+});
+
+test('[后台防休眠胶囊状态指示与交互] 胶囊条在未激活时显示激活提示，激活后显示已生效绿色状态，支持点击触发激活', async () => {
+    const { t, getShadowRoot } = renderHUDTest([['_kme_pref_col', 'false']]);
+    let running = false;
+    class ToggleAudioContext {
+        constructor() {
+            this.state = running ? 'running' : 'suspended';
+            this.destination = {};
+        }
+        createOscillator() { return { type: '', frequency: { value: 0 }, connect() {}, start() {}, stop() {}, disconnect() {} }; }
+        createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; }
+        resume() {
+            this.state = 'running';
+            running = true;
+            return Promise.resolve();
+        }
+        close() { return Promise.resolve(); }
+    }
+
+    t.context.window.AudioContext = ToggleAudioContext;
+    t.state.enabled = true;
+    await t.mainLoop();
+
+    const shadow = getShadowRoot();
+    const hud = shadow.children.find(c => c.id === 'jinpei-hud');
+    assert.ok(hud);
+
+    // 未激活时应包含点击激活后台防休眠提示
+    assert.match(hud.innerHTML, /id="jinpei-keepalive-badge"/);
+    assert.match(hud.innerHTML, /点击激活后台防休眠/);
+
+    // 点击该胶囊条触发激活
+    const badge = t.getHUDElement('jinpei-keepalive-badge');
+    assert.ok(badge);
+    badge.click();
+    await new Promise(resolve => setImmediate(resolve));
+
+    // 激活后胶囊条更新为已生效
+    assert.equal(t.isAudioKeepAliveActive(), true);
+    assert.match(badge.innerHTML, /后台防休眠已生效/);
 });

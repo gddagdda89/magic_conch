@@ -350,7 +350,7 @@
         // 1. 静音与速率
         if (CONFIG.autoMute && !video.muted) {
             video.muted = true;
-            diagnosticConsole.log("【神奇海螺】视频已自动静音（防爆音），底层由 Web Audio 维持静音保活");
+            diagnosticConsole.log("【神奇海螺】视频已自动静音（防爆音），底层由 Web Audio 维持后台防休眠");
         }
         if (video.playbackRate !== CONFIG.playbackRate) {
             video.playbackRate = CONFIG.playbackRate;

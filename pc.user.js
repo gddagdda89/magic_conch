@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         神奇海螺
 // @namespace    https://github.com/gddagdda89/magic_conch
-// @version      1.8.7
+// @version      1.8.8
 // @description  易知与江南金培课程学习助手，自动识别平台，支持课程连播与学习状态检查
 // @author       gddagdda89
 // @license      MIT
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = '1.8.7';
+const SCRIPT_VERSION = '1.8.8';
 
     function detectPlatform(url) {
         return /^https:\/\/jnftc\.jnbank\.com\.cn(?:\/|$)/i.test(url) ? 'jnftc' : 'yizhi';
@@ -28,7 +28,7 @@ const SCRIPT_VERSION = '1.8.7';
     const IS_JNFTC = PLATFORM === 'jnftc';
     const PLATFORM_NAME = IS_JNFTC ? '江南金培' : '易知';
 
-    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.7】脚本初始化启动...");
+    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.8】脚本初始化启动...");
 
     // 配置项
     const CONFIG = {
@@ -1073,21 +1073,25 @@ function getStorageItem(keyName, legacyKey) {
     }
 
     // ==========================================
-    // Web Audio 极微声波静音保活机制
+    // Web Audio 后台防休眠机制
     // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
-    // 产生真实 audible 特征（点亮标签页小喇叭），使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
+    // 产生真实 audible 发声特征，使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
     let keepAliveGainNode = null;
     let keepAliveGestureHooked = false;
     let hasLoggedRunning = false;
+    let hasLoggedSuspendedNotice = false;
 
     function reportAudioKeepAliveRunning() {
         if (!hasLoggedRunning) {
             hasLoggedRunning = true;
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                diagnosticConsole.log('【神奇海螺】Web Audio 保活已激活 (AudioContext: running，增益 0.002@30Hz，获得浏览器发声豁免免除后台节流)');
+                diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已激活 (AudioContext: running，增益 0.002@30Hz，已获浏览器调度豁免免除后台节流)');
+            }
+            if (typeof updateHUD === 'function') {
+                updateHUD();
             }
         }
     }
@@ -1119,13 +1123,14 @@ function getStorageItem(keyName, legacyKey) {
                 keepAliveOscillator = null;
                 keepAliveGainNode = null;
                 hasLoggedRunning = false;
+                hasLoggedSuspendedNotice = false;
             }
 
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
                 // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
-                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得 audible 豁免）
+                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得发声豁免）
                 gain.gain.value = 0.002;
                 osc.type = 'sine';
                 osc.frequency.value = 30;
@@ -1140,19 +1145,23 @@ function getStorageItem(keyName, legacyKey) {
                 reportAudioKeepAliveRunning();
             } else if (keepAliveAudioCtx.state === 'suspended') {
                 setupUserGestureResume();
+                if (!hasLoggedSuspendedNotice && typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                    hasLoggedSuspendedNotice = true;
+                    diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠就绪，当前等待手势激活 (点击 HUD 胶囊或页面任意处即可激活)');
+                }
                 keepAliveAudioCtx.resume().then(() => {
                     if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
                         reportAudioKeepAliveRunning();
                     }
                 }).catch((err) => {
                     if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                        diagnosticConsole.warn('【神奇海螺】Web Audio 保活处于挂起等待手势状态 (受浏览器自动播放策略限制，点击页面后自动激活):', err?.message || err);
+                        diagnosticConsole.warn('【神奇海螺】Web Audio 后台防休眠处于挂起等待手势状态 (受浏览器自动播放策略限制，与页面交互后自动激活):', err?.message || err);
                     }
                 });
             }
         } catch (err) {
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                diagnosticConsole.warn('【神奇海螺】Web Audio 保活启动受限:', err?.message || err);
+                diagnosticConsole.warn('【神奇海螺】Web Audio 后台防休眠启动受限:', err?.message || err);
             }
         }
     }
@@ -1160,6 +1169,7 @@ function getStorageItem(keyName, legacyKey) {
     function stopAudioKeepAlive() {
         keepAliveGestureHooked = false;
         hasLoggedRunning = false;
+        hasLoggedSuspendedNotice = false;
         try {
             if (keepAliveOscillator) {
                 try { keepAliveOscillator.stop(); } catch (_) {}
@@ -1176,7 +1186,10 @@ function getStorageItem(keyName, legacyKey) {
                 }
                 keepAliveAudioCtx = null;
                 if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                    diagnosticConsole.log('【神奇海螺】Web Audio 静音保活已释放');
+                    diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已释放');
+                }
+                if (typeof updateHUD === 'function') {
+                    updateHUD();
                 }
             }
         } catch (_) {}
@@ -1767,7 +1780,7 @@ function createHUD() {
                     <div id="jinpei-hud-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${dotBg}; animation: ${dotAnim}; flex-shrink: 0; ${isCollapsed ? 'position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95); z-index: 2;' : ''}"></div>
                     <span id="jinpei-hud-icon" style="font-size: ${isCollapsed ? '21px' : '14px'}; flex-shrink: 0; line-height: 1;" title="${isCollapsed ? '点击展开神奇海螺' : ''}">🐚</span>
                     <span id="jinpei-hud-title-text" style="font-weight: 600; font-size: 13px; color: #0f172a; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline'};">神奇海螺</span>
-                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.7</span>
+                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.8</span>
                     <a id="jinpei-hud-update-badge" href="${CONFIG.updateUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 10px; color: #ffffff; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 1px 6px; border-radius: 4px; font-weight: 600; text-decoration: none; white-space: nowrap; flex-shrink: 0; display: ${hasUpdate && !isCollapsed ? 'inline-block' : 'none'}; cursor: pointer; animation: jinpei-pulse 2s infinite ease-in-out; margin-left: 2px;" title="${hasUpdate ? `发现新版本 v${state.remoteVersion}，点击跳转更新` : '更新'}">更新 v${state.remoteVersion || ''}</a>
                 </div>
                 <div id="jinpei-hud-header-right" style="display: ${isCollapsed ? 'none' : 'flex'}; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap;">
@@ -1802,6 +1815,29 @@ function createHUD() {
                     <span id="jinpei-btn-icon">${btnIcon}</span>
                     <span id="jinpei-btn-text">${btnText}</span>
                 </button>
+
+                <!-- 后台防休眠状态胶囊指示器 -->
+                <div id="jinpei-keepalive-badge" style="
+                    display: ${state.enabled ? 'flex' : 'none'};
+                    align-items: center;
+                    justify-content: center;
+                    gap: 5px;
+                    padding: 5px 9px;
+                    margin-bottom: 9px;
+                    border-radius: 8px;
+                    font-size: 10.5px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    user-select: none;
+                    text-align: center;
+                    line-height: 1.35;
+                    background: rgba(245, 158, 11, 0.1);
+                    border: 1px solid rgba(245, 158, 11, 0.35);
+                    color: #b45309;
+                    cursor: pointer;
+                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！">
+                    <span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>
+                </div>
 
                 <!-- 浅色磨砂信息栏 -->
                 <div class="jinpei-info-box" style="
@@ -1987,7 +2023,18 @@ function createHUD() {
                 clampHUDPosition();
             });
         }
+        const keepaliveBadge = getHUDElement('jinpei-keepalive-badge');
+        if (keepaliveBadge) {
+            keepaliveBadge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof startAudioKeepAlive === 'function') {
+                    startAudioKeepAlive();
+                }
+                updateKeepAliveBadge();
+            });
+        }
         updateOutcomeHUD();
+        updateKeepAliveBadge();
 
         const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
         const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');
@@ -2346,6 +2393,32 @@ function createHUD() {
         }
     }
 
+    function updateKeepAliveBadge() {
+        const badge = getHUDElement('jinpei-keepalive-badge');
+        if (!badge) return;
+        if (!state.enabled) {
+            badge.style.display = 'none';
+            return;
+        }
+        badge.style.display = 'flex';
+        const isActive = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
+        if (isActive) {
+            badge.style.background = 'rgba(16, 185, 129, 0.08)';
+            badge.style.border = '1px solid rgba(16, 185, 129, 0.25)';
+            badge.style.color = '#059669';
+            badge.style.cursor = 'default';
+            badge.title = '后台防休眠已全速生效：已获浏览器发声调度豁免，可放心最小化或切到后台虚拟桌面';
+            badge.innerHTML = '<span>🟢</span> <span>后台防休眠已生效（全频运行 · 可放心最小化）</span>';
+        } else {
+            badge.style.background = 'rgba(245, 158, 11, 0.1)';
+            badge.style.border = '1px solid rgba(245, 158, 11, 0.35)';
+            badge.style.color = '#b45309';
+            badge.style.cursor = 'pointer';
+            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！';
+            badge.innerHTML = '<span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>';
+        }
+    }
+
     function updateHUD(status, task, sub, progress, course, allCoursesProg, courseTotalProg, courseTotalPercent) {
         if (status) state.statusText = status;
         if (task !== undefined) state.currentTask = task;
@@ -2356,6 +2429,7 @@ function createHUD() {
         if (courseTotalProg !== undefined) state.courseTotalProgress = courseTotalProg;
         if (courseTotalPercent !== undefined) state.courseTotalPercent = courseTotalPercent;
         updateOutcomeHUD();
+        updateKeepAliveBadge();
 
         const minimizeAlertRow = getHUDElement('jinpei-minimize-alert-row');
         const minimizeAlertTextEl = getHUDElement('jinpei-minimize-alert-text');
@@ -2569,12 +2643,19 @@ function createHUD() {
                     watchdogRuntime.lastProgressTimestamp = Date.now();
                 }
 
-                // 仅当挂起 3 秒以上且处于运行状态时触发醒目提示
+                // 仅当挂起 3 秒以上且处于运行状态时触发提示
                 if (durationSec >= 3 && state.enabled) {
                     const durText = formatMinimizationDuration(durationSec);
-                    const alertMsg = `检测到窗口在后台/最小化约 ${durText}。浏览器休眠会冻结心跳上报，易导致挂课失败或重播。建议：保持窗口展开挂课（切勿最小化到任务栏；可用 Win+Ctrl+D 虚拟桌面或被其他软件遮挡）。`;
-                    state.minimizedAlertText = alertMsg;
-                    diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从最小化恢复（后台挂起约 ${durText}）。浏览器底层已可能冻结视频或心跳上报，已在 HUD 提示避免最小化！`);
+                    const isAudioProtected = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
+                    if (isAudioProtected) {
+                        // 已经拥有后台防休眠发声豁免，免除浏览器后台节流，无需弹出刺眼的警告横幅
+                        state.minimizedAlertText = '';
+                        diagnosticConsole.log(`【神奇海螺】检测到窗口从后台恢复（后台约 ${durText}），后台防休眠持续生效中，心跳与定时器正常运行。`);
+                    } else {
+                        const alertMsg = `检测到窗口在后台约 ${durText}（后台防休眠尚未激活）。建议点击 HUD 激活防休眠胶囊，或保持窗口展开挂课。`;
+                        state.minimizedAlertText = alertMsg;
+                        diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从后台恢复（挂起约 ${durText}，防休眠未激活）。已在 HUD 提示激活防休眠！`);
+                    }
                     if (typeof updateHUD === 'function') {
                         updateHUD();
                     }
@@ -4168,7 +4249,7 @@ function getTaskCards() {
         // 1. 静音与速率
         if (CONFIG.autoMute && !video.muted) {
             video.muted = true;
-            diagnosticConsole.log("【神奇海螺】视频已自动静音（防爆音），底层由 Web Audio 维持静音保活");
+            diagnosticConsole.log("【神奇海螺】视频已自动静音（防爆音），底层由 Web Audio 维持后台防休眠");
         }
         if (video.playbackRate !== CONFIG.playbackRate) {
             video.playbackRate = CONFIG.playbackRate;
@@ -5318,6 +5399,6 @@ let jnReportPromise = null;
     setTimeout(mainLoop, 1000);
     checkScriptUpdate().catch(() => {});
 
-    recordDiagnostic('INFO', '脚本初始化 v1.8.7，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程 + Web Audio 静音保活' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
+    recordDiagnostic('INFO', '脚本初始化 v1.8.8，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程 + Web Audio 静音保活' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
 
 })();
