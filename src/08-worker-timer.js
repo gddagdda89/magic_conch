@@ -81,11 +81,39 @@
 
     // ==========================================
     // Web Audio 极微声波静音保活机制
-    // 利用 AudioContext 播放极低音量振荡流，使 Chromium 标记标签页为媒体活动中，
-    // 全面豁免锁屏与最小化时的 60 秒定时器节流（Timer Throttling）
+    // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
+    // 产生真实 audible 特征（点亮标签页小喇叭），使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
+    let keepAliveGainNode = null;
+    let keepAliveGestureHooked = false;
+    let hasLoggedRunning = false;
+
+    function reportAudioKeepAliveRunning() {
+        if (!hasLoggedRunning) {
+            hasLoggedRunning = true;
+            if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                diagnosticConsole.log('【神奇海螺】Web Audio 保活已激活 (AudioContext: running，增益 0.002@30Hz，获得浏览器发声豁免免除后台节流)');
+            }
+        }
+    }
+
+    function setupUserGestureResume() {
+        if (keepAliveGestureHooked || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+        keepAliveGestureHooked = true;
+        const onUserGesture = () => {
+            if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'suspended') {
+                keepAliveAudioCtx.resume().then(() => {
+                    if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
+                        reportAudioKeepAliveRunning();
+                    }
+                }).catch(() => {});
+            }
+        };
+        window.addEventListener('click', onUserGesture, { once: true, capture: true });
+        window.addEventListener('keydown', onUserGesture, { once: true, capture: true });
+    }
 
     function startAudioKeepAlive() {
         if (typeof window === 'undefined') return;
@@ -95,38 +123,59 @@
         try {
             if (!keepAliveAudioCtx || keepAliveAudioCtx.state === 'closed') {
                 keepAliveAudioCtx = new AudioContextClass();
+                keepAliveOscillator = null;
+                keepAliveGainNode = null;
+                hasLoggedRunning = false;
             }
-            if (keepAliveAudioCtx.state === 'suspended') {
-                keepAliveAudioCtx.resume().catch(() => {});
-            }
+
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
-                // 极微音量 0.0001：人耳完全不可闻，但在浏览器音频渲染器中持续产生音频流，保持后台满频运行
-                gain.gain.value = 0.0001;
+                // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
+                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得 audible 豁免）
+                gain.gain.value = 0.002;
                 osc.type = 'sine';
-                osc.frequency.value = 440;
+                osc.frequency.value = 30;
                 osc.connect(gain);
                 gain.connect(keepAliveAudioCtx.destination);
                 osc.start();
                 keepAliveOscillator = osc;
-                if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                    diagnosticConsole.log(`【神奇海螺】Web Audio 静音保活已激活 (AudioContext: ${keepAliveAudioCtx.state}，微声增益: 0.0001，免除锁屏与后台定时器节流)`);
-                }
+                keepAliveGainNode = gain;
+            }
+
+            if (keepAliveAudioCtx.state === 'running') {
+                reportAudioKeepAliveRunning();
+            } else if (keepAliveAudioCtx.state === 'suspended') {
+                setupUserGestureResume();
+                keepAliveAudioCtx.resume().then(() => {
+                    if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
+                        reportAudioKeepAliveRunning();
+                    }
+                }).catch((err) => {
+                    if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
+                        diagnosticConsole.warn('【神奇海螺】Web Audio 保活处于挂起等待手势状态 (受浏览器自动播放策略限制，点击页面后自动激活):', err?.message || err);
+                    }
+                });
             }
         } catch (err) {
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                diagnosticConsole.warn('【神奇海螺】Web Audio 静音保活启动受限:', err?.message || err);
+                diagnosticConsole.warn('【神奇海螺】Web Audio 保活启动受限:', err?.message || err);
             }
         }
     }
 
     function stopAudioKeepAlive() {
+        keepAliveGestureHooked = false;
+        hasLoggedRunning = false;
         try {
             if (keepAliveOscillator) {
                 try { keepAliveOscillator.stop(); } catch (_) {}
                 try { keepAliveOscillator.disconnect(); } catch (_) {}
                 keepAliveOscillator = null;
+            }
+            if (keepAliveGainNode) {
+                try { keepAliveGainNode.disconnect(); } catch (_) {}
+                keepAliveGainNode = null;
             }
             if (keepAliveAudioCtx) {
                 if (keepAliveAudioCtx.state !== 'closed' && typeof keepAliveAudioCtx.close === 'function') {

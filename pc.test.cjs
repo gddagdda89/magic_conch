@@ -2729,3 +2729,101 @@ test('[防锁屏超时误判] 后台/锁屏下重播只要视频缓冲就绪，�
     assert.equal(t.state.enabled, true, '不应因后台时钟跳跃而误判暂停');
     assert.equal(t.fixture.video.plays > 0, true, '应成功调用 video.play() 恢复播放');
 });
+
+test('[Web Audio 状态可靠上报] 处于 suspended 状态时绝不虚假上报激活，手势恢复后才上报激活', async () => {
+    const t = setup();
+    let currentGain = 0;
+    let currentFreq = 0;
+    let lastCtx = null;
+    const windowListeners = {};
+    t.context.window.addEventListener = (event, fn) => {
+        windowListeners[event] = windowListeners[event] || [];
+        windowListeners[event].push(fn);
+    };
+
+    class SuspendedAudioContext {
+        constructor() {
+            this.state = 'suspended';
+            this.destination = {};
+            lastCtx = this;
+        }
+        createOscillator() {
+            return {
+                type: '', frequency: { set value(v) { currentFreq = v; }, get value() { return currentFreq; } },
+                connect(dest) { this.dest = dest; },
+                start() {},
+                stop() {},
+                disconnect() {}
+            };
+        }
+        createGain() {
+            return {
+                gain: { set value(v) { currentGain = v; }, get value() { return currentGain; } },
+                connect(dest) { this.dest = dest; },
+                disconnect() {}
+            };
+        }
+        resume() {
+            return new Promise((resolve) => {
+                this.resumeResolver = () => {
+                    this.state = 'running';
+                    resolve();
+                };
+            });
+        }
+        close() { this.state = 'closed'; return Promise.resolve(); }
+    }
+
+    t.context.window.AudioContext = SuspendedAudioContext;
+    t.startAudioKeepAlive();
+
+    // 此时仍处于 suspended，且 resume 未 resolve，绝不能判定为激活！
+    assert.equal(t.isAudioKeepAliveActive(), false, '挂起状态下 isAudioKeepAliveActive 必须为 false');
+    assert.equal(currentGain, 0.002, '音频增益必须符合 0.002 规范');
+    assert.equal(currentFreq, 30, '振荡器频率必须符合 30Hz 超低频规范');
+
+    const logsBefore = t.formatDiagnosticLogs();
+    assert.equal(logsBefore.includes('Web Audio 保活已激活'), false, '未真正 running 时绝不记录激活成功日志');
+
+    // 模拟用户手势交互唤醒：派发 click 事件
+    assert.ok(windowListeners['click']?.length > 0, '必须注册 click 手势监听器');
+    windowListeners['click'].forEach(fn => fn({ type: 'click' }));
+    assert.ok(lastCtx && typeof lastCtx.resumeResolver === 'function', '手势必须触发 resume()');
+    lastCtx.resumeResolver();
+    await new Promise(resolve => setImmediate(resolve));
+
+    // 唤醒后状态变为 running，且记录日志
+    assert.equal(t.isAudioKeepAliveActive(), true, '唤醒后 isAudioKeepAliveActive 必须为 true');
+    const logsAfter = t.formatDiagnosticLogs();
+    assert.ok(logsAfter.includes('Web Audio 保活已激活'), '唤醒后应记录激活成功日志');
+});
+
+test('[金培整页跳转音频保活恢复] 金培整页跳转后 mainLoop 不被提前分支截断，能正常恢复音频保活', () => {
+    const t = setup([], [], { url: 'https://jnftc.jnbank.com.cn/WebTraining14/Web/MyDuty/MyDutyList.aspx?Menu=9' });
+    let started = false;
+    class MockAudioContext {
+        constructor() { this.state = 'running'; this.destination = {}; }
+        createOscillator() {
+            return {
+                type: '', frequency: { value: 0 },
+                connect() {},
+                start() { started = true; },
+                stop() {},
+                disconnect() {}
+            };
+        }
+        createGain() {
+            return { gain: { value: 1 }, connect() {}, disconnect() {} };
+        }
+        close() { return Promise.resolve(); }
+    }
+    t.context.window.AudioContext = MockAudioContext;
+    t.state.enabled = true;
+
+    // 金培页面执行 mainLoop
+    t.mainLoop();
+
+    // 验证音频保活已在进入金培平台分支前成功启动
+    assert.equal(started, true, '金培页面整页加载后 mainLoop 必须启动音频保活');
+    assert.equal(t.isAudioKeepAliveActive(), true, '金培页面整页跳转后保活状态必须为 true');
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         神奇海螺
 // @namespace    https://github.com/gddagdda89/magic_conch
-// @version      1.8.6
+// @version      1.8.7
 // @description  易知与江南金培课程学习助手，自动识别平台，支持课程连播与学习状态检查
 // @author       gddagdda89
 // @license      MIT
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = '1.8.6';
+const SCRIPT_VERSION = '1.8.7';
 
     function detectPlatform(url) {
         return /^https:\/\/jnftc\.jnbank\.com\.cn(?:\/|$)/i.test(url) ? 'jnftc' : 'yizhi';
@@ -28,7 +28,7 @@ const SCRIPT_VERSION = '1.8.6';
     const IS_JNFTC = PLATFORM === 'jnftc';
     const PLATFORM_NAME = IS_JNFTC ? '江南金培' : '易知';
 
-    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.6】脚本初始化启动...");
+    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.7】脚本初始化启动...");
 
     // 配置项
     const CONFIG = {
@@ -1074,11 +1074,39 @@ function getStorageItem(keyName, legacyKey) {
 
     // ==========================================
     // Web Audio 极微声波静音保活机制
-    // 利用 AudioContext 播放极低音量振荡流，使 Chromium 标记标签页为媒体活动中，
-    // 全面豁免锁屏与最小化时的 60 秒定时器节流（Timer Throttling）
+    // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
+    // 产生真实 audible 特征（点亮标签页小喇叭），使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
+    let keepAliveGainNode = null;
+    let keepAliveGestureHooked = false;
+    let hasLoggedRunning = false;
+
+    function reportAudioKeepAliveRunning() {
+        if (!hasLoggedRunning) {
+            hasLoggedRunning = true;
+            if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                diagnosticConsole.log('【神奇海螺】Web Audio 保活已激活 (AudioContext: running，增益 0.002@30Hz，获得浏览器发声豁免免除后台节流)');
+            }
+        }
+    }
+
+    function setupUserGestureResume() {
+        if (keepAliveGestureHooked || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+        keepAliveGestureHooked = true;
+        const onUserGesture = () => {
+            if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'suspended') {
+                keepAliveAudioCtx.resume().then(() => {
+                    if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
+                        reportAudioKeepAliveRunning();
+                    }
+                }).catch(() => {});
+            }
+        };
+        window.addEventListener('click', onUserGesture, { once: true, capture: true });
+        window.addEventListener('keydown', onUserGesture, { once: true, capture: true });
+    }
 
     function startAudioKeepAlive() {
         if (typeof window === 'undefined') return;
@@ -1088,38 +1116,59 @@ function getStorageItem(keyName, legacyKey) {
         try {
             if (!keepAliveAudioCtx || keepAliveAudioCtx.state === 'closed') {
                 keepAliveAudioCtx = new AudioContextClass();
+                keepAliveOscillator = null;
+                keepAliveGainNode = null;
+                hasLoggedRunning = false;
             }
-            if (keepAliveAudioCtx.state === 'suspended') {
-                keepAliveAudioCtx.resume().catch(() => {});
-            }
+
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
-                // 极微音量 0.0001：人耳完全不可闻，但在浏览器音频渲染器中持续产生音频流，保持后台满频运行
-                gain.gain.value = 0.0001;
+                // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
+                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得 audible 豁免）
+                gain.gain.value = 0.002;
                 osc.type = 'sine';
-                osc.frequency.value = 440;
+                osc.frequency.value = 30;
                 osc.connect(gain);
                 gain.connect(keepAliveAudioCtx.destination);
                 osc.start();
                 keepAliveOscillator = osc;
-                if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                    diagnosticConsole.log(`【神奇海螺】Web Audio 静音保活已激活 (AudioContext: ${keepAliveAudioCtx.state}，微声增益: 0.0001，免除锁屏与后台定时器节流)`);
-                }
+                keepAliveGainNode = gain;
+            }
+
+            if (keepAliveAudioCtx.state === 'running') {
+                reportAudioKeepAliveRunning();
+            } else if (keepAliveAudioCtx.state === 'suspended') {
+                setupUserGestureResume();
+                keepAliveAudioCtx.resume().then(() => {
+                    if (keepAliveAudioCtx && keepAliveAudioCtx.state === 'running') {
+                        reportAudioKeepAliveRunning();
+                    }
+                }).catch((err) => {
+                    if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
+                        diagnosticConsole.warn('【神奇海螺】Web Audio 保活处于挂起等待手势状态 (受浏览器自动播放策略限制，点击页面后自动激活):', err?.message || err);
+                    }
+                });
             }
         } catch (err) {
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
-                diagnosticConsole.warn('【神奇海螺】Web Audio 静音保活启动受限:', err?.message || err);
+                diagnosticConsole.warn('【神奇海螺】Web Audio 保活启动受限:', err?.message || err);
             }
         }
     }
 
     function stopAudioKeepAlive() {
+        keepAliveGestureHooked = false;
+        hasLoggedRunning = false;
         try {
             if (keepAliveOscillator) {
                 try { keepAliveOscillator.stop(); } catch (_) {}
                 try { keepAliveOscillator.disconnect(); } catch (_) {}
                 keepAliveOscillator = null;
+            }
+            if (keepAliveGainNode) {
+                try { keepAliveGainNode.disconnect(); } catch (_) {}
+                keepAliveGainNode = null;
             }
             if (keepAliveAudioCtx) {
                 if (keepAliveAudioCtx.state !== 'closed' && typeof keepAliveAudioCtx.close === 'function') {
@@ -1718,7 +1767,7 @@ function createHUD() {
                     <div id="jinpei-hud-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${dotBg}; animation: ${dotAnim}; flex-shrink: 0; ${isCollapsed ? 'position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95); z-index: 2;' : ''}"></div>
                     <span id="jinpei-hud-icon" style="font-size: ${isCollapsed ? '21px' : '14px'}; flex-shrink: 0; line-height: 1;" title="${isCollapsed ? '点击展开神奇海螺' : ''}">🐚</span>
                     <span id="jinpei-hud-title-text" style="font-weight: 600; font-size: 13px; color: #0f172a; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline'};">神奇海螺</span>
-                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.6</span>
+                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.7</span>
                     <a id="jinpei-hud-update-badge" href="${CONFIG.updateUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 10px; color: #ffffff; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 1px 6px; border-radius: 4px; font-weight: 600; text-decoration: none; white-space: nowrap; flex-shrink: 0; display: ${hasUpdate && !isCollapsed ? 'inline-block' : 'none'}; cursor: pointer; animation: jinpei-pulse 2s infinite ease-in-out; margin-left: 2px;" title="${hasUpdate ? `发现新版本 v${state.remoteVersion}，点击跳转更新` : '更新'}">更新 v${state.remoteVersion || ''}</a>
                 </div>
                 <div id="jinpei-hud-header-right" style="display: ${isCollapsed ? 'none' : 'flex'}; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap;">
@@ -5219,11 +5268,12 @@ let jnReportPromise = null;
         }
         createHUD();
         renderTaskSelection();
-        if (IS_JNFTC) { updateHUD(); return handleJnPlatform(); }
 
         // 未手动启动时，不执行任何自动化逻辑（包括不自动弹窗确认、不自动播放、不自动跳转）
         if (!state.enabled) return;
         startAudioKeepAlive();
+
+        if (IS_JNFTC) { updateHUD(); return handleJnPlatform(); }
 
         observeVideoPlayback(document.querySelector('video'));
         loadTaskCatalog().then(() => {
@@ -5268,6 +5318,6 @@ let jnReportPromise = null;
     setTimeout(mainLoop, 1000);
     checkScriptUpdate().catch(() => {});
 
-    recordDiagnostic('INFO', '脚本初始化 v1.8.6，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程 + Web Audio 静音保活' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
+    recordDiagnostic('INFO', '脚本初始化 v1.8.7，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程 + Web Audio 静音保活' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
 
 })();
