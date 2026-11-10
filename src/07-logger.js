@@ -87,6 +87,8 @@
                 player: tracker.id, sourceRevision: tracker.sourceRevision,
                 subKey: active ? getSubVideoKey(active) : '',
                 currentTime: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : null,
+                muted: video.muted, volume: video.volume,
+                audioKeepAlive: typeof isAudioKeepAliveActive === 'function' ? isAudioKeepAliveActive() : false,
                 ended: video.ended, paused: video.paused, seeking: video.seeking,
                 readyState: video.readyState, switching: state.isSwitching,
                 actionPending: state.isActionPending, completed: active ? isItemCompleted(active) : null,
@@ -258,6 +260,7 @@
         removeLocalItem(STORAGE_KEYS.running);
         unregisterTab();
         clearAllManagedTimeouts();
+        stopAudioKeepAlive();
         clearWatchdogState();
         state.isSwitching = false;
         state.isActionPending = false;

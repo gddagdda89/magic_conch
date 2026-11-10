@@ -61,15 +61,27 @@ async function run() {
     let call;
     try {
         await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-        child = spawn(chrome, ['--headless=new', '--remote-debugging-port=0', '--user-data-dir=' + profile,
-            '--no-first-run', '--no-default-browser-check', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+        let stderr = '';
+        child = spawn(chrome, [
+            '--headless=new',
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-setuid-sandbox',
+            '--remote-debugging-port=0',
+            '--user-data-dir=' + profile,
+            '--no-first-run',
+            '--no-default-browser-check',
+            'about:blank'
+        ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        child.stderr?.on('data', chunk => { stderr += chunk; });
         let launchError;
         child.on('error', error => { launchError = error; });
         const portFile = path.join(profile, 'DevToolsActivePort');
         const deadline = Date.now() + 15000;
         while (!fs.existsSync(portFile) && Date.now() < deadline && !launchError) await delay(100);
         if (launchError) throw launchError;
-        assert.ok(fs.existsSync(portFile), 'Chrome debugging endpoint did not start');
+        assert.ok(fs.existsSync(portFile), 'Chrome debugging endpoint did not start' + (stderr ? ': ' + stderr : ''));
         const port = fs.readFileSync(portFile, 'utf8').split('\n')[0];
         const base = 'http://127.0.0.1:' + port;
         const url = 'http://127.0.0.1:' + server.address().port + '/home/my/myTask';

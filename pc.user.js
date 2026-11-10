@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         神奇海螺
 // @namespace    https://github.com/gddagdda89/magic_conch
-// @version      1.8.5
+// @version      1.8.6
 // @description  易知与江南金培课程学习助手，自动识别平台，支持课程连播与学习状态检查
 // @author       gddagdda89
 // @license      MIT
@@ -19,7 +19,7 @@
 (function () {
     'use strict';
 
-const SCRIPT_VERSION = '1.8.5';
+const SCRIPT_VERSION = '1.8.6';
 
     function detectPlatform(url) {
         return /^https:\/\/jnftc\.jnbank\.com\.cn(?:\/|$)/i.test(url) ? 'jnftc' : 'yizhi';
@@ -28,7 +28,7 @@ const SCRIPT_VERSION = '1.8.5';
     const IS_JNFTC = PLATFORM === 'jnftc';
     const PLATFORM_NAME = IS_JNFTC ? '江南金培' : '易知';
 
-    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.5】脚本初始化启动...");
+    console.log(`[${formatLogTimestamp()}]`, "【神奇海螺 v1.8.6】脚本初始化启动...");
 
     // 配置项
     const CONFIG = {
@@ -789,6 +789,8 @@ function getStorageItem(keyName, legacyKey) {
                 player: tracker.id, sourceRevision: tracker.sourceRevision,
                 subKey: active ? getSubVideoKey(active) : '',
                 currentTime: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : null,
+                muted: video.muted, volume: video.volume,
+                audioKeepAlive: typeof isAudioKeepAliveActive === 'function' ? isAudioKeepAliveActive() : false,
                 ended: video.ended, paused: video.paused, seeking: video.seeking,
                 readyState: video.readyState, switching: state.isSwitching,
                 actionPending: state.isActionPending, completed: active ? isItemCompleted(active) : null,
@@ -960,6 +962,7 @@ function getStorageItem(keyName, legacyKey) {
         removeLocalItem(STORAGE_KEYS.running);
         unregisterTab();
         clearAllManagedTimeouts();
+        stopAudioKeepAlive();
         clearWatchdogState();
         state.isSwitching = false;
         state.isActionPending = false;
@@ -1067,6 +1070,71 @@ function getStorageItem(keyName, legacyKey) {
                 }
             };
         }
+    }
+
+    // ==========================================
+    // Web Audio 极微声波静音保活机制
+    // 利用 AudioContext 播放极低音量振荡流，使 Chromium 标记标签页为媒体活动中，
+    // 全面豁免锁屏与最小化时的 60 秒定时器节流（Timer Throttling）
+    // ==========================================
+    let keepAliveAudioCtx = null;
+    let keepAliveOscillator = null;
+
+    function startAudioKeepAlive() {
+        if (typeof window === 'undefined') return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        try {
+            if (!keepAliveAudioCtx || keepAliveAudioCtx.state === 'closed') {
+                keepAliveAudioCtx = new AudioContextClass();
+            }
+            if (keepAliveAudioCtx.state === 'suspended') {
+                keepAliveAudioCtx.resume().catch(() => {});
+            }
+            if (!keepAliveOscillator) {
+                const osc = keepAliveAudioCtx.createOscillator();
+                const gain = keepAliveAudioCtx.createGain();
+                // 极微音量 0.0001：人耳完全不可闻，但在浏览器音频渲染器中持续产生音频流，保持后台满频运行
+                gain.gain.value = 0.0001;
+                osc.type = 'sine';
+                osc.frequency.value = 440;
+                osc.connect(gain);
+                gain.connect(keepAliveAudioCtx.destination);
+                osc.start();
+                keepAliveOscillator = osc;
+                if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                    diagnosticConsole.log(`【神奇海螺】Web Audio 静音保活已激活 (AudioContext: ${keepAliveAudioCtx.state}，微声增益: 0.0001，免除锁屏与后台定时器节流)`);
+                }
+            }
+        } catch (err) {
+            if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.warn === 'function') {
+                diagnosticConsole.warn('【神奇海螺】Web Audio 静音保活启动受限:', err?.message || err);
+            }
+        }
+    }
+
+    function stopAudioKeepAlive() {
+        try {
+            if (keepAliveOscillator) {
+                try { keepAliveOscillator.stop(); } catch (_) {}
+                try { keepAliveOscillator.disconnect(); } catch (_) {}
+                keepAliveOscillator = null;
+            }
+            if (keepAliveAudioCtx) {
+                if (keepAliveAudioCtx.state !== 'closed' && typeof keepAliveAudioCtx.close === 'function') {
+                    keepAliveAudioCtx.close().catch(() => {});
+                }
+                keepAliveAudioCtx = null;
+                if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
+                    diagnosticConsole.log('【神奇海螺】Web Audio 静音保活已释放');
+                }
+            }
+        } catch (_) {}
+    }
+
+    function isAudioKeepAliveActive() {
+        return !!(keepAliveAudioCtx && keepAliveOscillator && keepAliveAudioCtx.state === 'running');
     }
 
 // ==========================================
@@ -1650,7 +1718,7 @@ function createHUD() {
                     <div id="jinpei-hud-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${dotBg}; animation: ${dotAnim}; flex-shrink: 0; ${isCollapsed ? 'position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95); z-index: 2;' : ''}"></div>
                     <span id="jinpei-hud-icon" style="font-size: ${isCollapsed ? '21px' : '14px'}; flex-shrink: 0; line-height: 1;" title="${isCollapsed ? '点击展开神奇海螺' : ''}">🐚</span>
                     <span id="jinpei-hud-title-text" style="font-weight: 600; font-size: 13px; color: #0f172a; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline'};">神奇海螺</span>
-                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.5</span>
+                    <span id="jinpei-hud-version" style="font-size: 10px; color: #64748b; background: rgba(0, 0, 0, 0.05); padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; display: ${isCollapsed ? 'none' : 'inline-block'};">v1.8.6</span>
                     <a id="jinpei-hud-update-badge" href="${CONFIG.updateUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 10px; color: #ffffff; background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 1px 6px; border-radius: 4px; font-weight: 600; text-decoration: none; white-space: nowrap; flex-shrink: 0; display: ${hasUpdate && !isCollapsed ? 'inline-block' : 'none'}; cursor: pointer; animation: jinpei-pulse 2s infinite ease-in-out; margin-left: 2px;" title="${hasUpdate ? `发现新版本 v${state.remoteVersion}，点击跳转更新` : '更新'}">更新 v${state.remoteVersion || ''}</a>
                 </div>
                 <div id="jinpei-hud-header-right" style="display: ${isCollapsed ? 'none' : 'flex'}; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap;">
@@ -2121,6 +2189,7 @@ function createHUD() {
             }
             state.enabled = !state.enabled;
             if (state.enabled) {
+                startAudioKeepAlive();
                 setStorageItem(STORAGE_KEYS.running, 'true');
                 setLocalItem(STORAGE_KEYS.running, 'true');
                 btnIconEl.innerText = "⏸";
@@ -3241,16 +3310,11 @@ function createHUD() {
             updateHUD(`「${title}」等待播放器恢复，准备重试播放 (${playAttempts}/${CONFIG.replayPlayMaxAttempts})...`);
             setManagedTimeout(waitAndPlay, 1000);
         };
+        let pollCount = 0;
         const waitAndPlay = () => {
             if (!isPending()) return;
-            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
-            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
-                startedAt = Date.now();
-            }
-            if (Date.now() - startedAt >= CONFIG.replayStartTimeout) {
-                fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
-                return;
-            }
+            pollCount++;
+
             if (isItemCompleted(subEl)) {
                 settled = true;
                 clearCompletedReplay(subEl);
@@ -3259,12 +3323,56 @@ function createHUD() {
                 switchToNextSubVideoOrCourse();
                 return;
             }
+
+            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
+            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
+                startedAt = Date.now();
+            }
+
             // currentTime 已赋值不代表跳转完成，还需等待 seek 与缓冲就绪。
             if (!video.seeking && Math.abs(video.currentTime - targetTime) <= 1) seekConfirmed = true;
-            if (!seekConfirmed || video.seeking || (typeof video.readyState === 'number' && video.readyState < 2)) {
+            const isReadyToPlay = (seekConfirmed || Math.abs(video.currentTime - targetTime) <= 1) &&
+                !video.seeking &&
+                (typeof video.readyState !== 'number' || video.readyState >= 2);
+
+            // 关键保护 1：如果视频已经跳转并缓冲就绪，且尚未发起过播放（playAttempts === 0），
+            // 绝不能因为后台/锁屏节流期间自然时钟越过了超时阈值而直接误杀，必须立即执行播放！
+            if (isReadyToPlay && playAttempts === 0) {
+                playAttempts++;
+                const id = ++requestId;
+                try {
+                    Promise.resolve(video.play()).then(() => {
+                        if (!isPending() || id !== requestId) return;
+                        if (video.paused || video.seeking) {
+                            retry(new Error('播放器尚未进入播放状态'), id);
+                        } else {
+                            finish();
+                        }
+                    }, error => retry(error, id));
+                    setManagedTimeout(() => retry(new Error('播放请求等待超时'), id), 4000);
+                } catch (error) {
+                    retry(error, id);
+                }
+                return;
+            }
+
+            // 关键保护 2：后台/锁屏状态下，Chromium 定时器会被强制压制为 60 秒一次。
+            // 若处于隐藏状态，放宽等待时间阈值（至少 180 秒且不少于 3 次轮询），避免唤醒第一枪瞬间超时。
+            const isMinimized = !!(state.isCurrentlyMinimized || state.minimizedAt);
+            const effectiveTimeout = isMinimized
+                ? Math.max(CONFIG.replayStartTimeout, 180000)
+                : CONFIG.replayStartTimeout;
+
+            if (Date.now() - startedAt >= effectiveTimeout && (pollCount >= 3 || !isMinimized)) {
+                fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
+                return;
+            }
+
+            if (!isReadyToPlay) {
                 setManagedTimeout(waitAndPlay, 500);
                 return;
             }
+
             playAttempts++;
             const id = ++requestId;
             try {
@@ -4011,6 +4119,7 @@ function getTaskCards() {
         // 1. 静音与速率
         if (CONFIG.autoMute && !video.muted) {
             video.muted = true;
+            diagnosticConsole.log("【神奇海螺】视频已自动静音（防爆音），底层由 Web Audio 维持静音保活");
         }
         if (video.playbackRate !== CONFIG.playbackRate) {
             video.playbackRate = CONFIG.playbackRate;
@@ -5114,6 +5223,7 @@ let jnReportPromise = null;
 
         // 未手动启动时，不执行任何自动化逻辑（包括不自动弹窗确认、不自动播放、不自动跳转）
         if (!state.enabled) return;
+        startAudioKeepAlive();
 
         observeVideoPlayback(document.querySelector('video'));
         loadTaskCatalog().then(() => {
@@ -5158,6 +5268,6 @@ let jnReportPromise = null;
     setTimeout(mainLoop, 1000);
     checkScriptUpdate().catch(() => {});
 
-    recordDiagnostic('INFO', '脚本初始化 v1.8.5，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
+    recordDiagnostic('INFO', '脚本初始化 v1.8.6，运行状态：' + (state.enabled ? '已启动' : '待启动') + ' (防休眠: ' + (workerTimer.type === 'worker' ? 'Web Worker 独立线程 + Web Audio 静音保活' : '主线程计时器') + ')' + (accountResetOnStartup ? '；已清理上次账号的学习状态' : ''));
 
 })();

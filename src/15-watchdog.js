@@ -279,16 +279,11 @@
             updateHUD(`「${title}」等待播放器恢复，准备重试播放 (${playAttempts}/${CONFIG.replayPlayMaxAttempts})...`);
             setManagedTimeout(waitAndPlay, 1000);
         };
+        let pollCount = 0;
         const waitAndPlay = () => {
             if (!isPending()) return;
-            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
-            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
-                startedAt = Date.now();
-            }
-            if (Date.now() - startedAt >= CONFIG.replayStartTimeout) {
-                fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
-                return;
-            }
+            pollCount++;
+
             if (isItemCompleted(subEl)) {
                 settled = true;
                 clearCompletedReplay(subEl);
@@ -297,12 +292,56 @@
                 switchToNextSubVideoOrCourse();
                 return;
             }
+
+            // 若在重播准备期间窗口发生最小化并刚刚恢复，且尚未尝试播放，给播放器一次从前台唤醒的等待机会
+            if (playAttempts === 0 && state.lastMinimizationRestoredAt && state.lastMinimizationRestoredAt > startedAt) {
+                startedAt = Date.now();
+            }
+
             // currentTime 已赋值不代表跳转完成，还需等待 seek 与缓冲就绪。
             if (!video.seeking && Math.abs(video.currentTime - targetTime) <= 1) seekConfirmed = true;
-            if (!seekConfirmed || video.seeking || (typeof video.readyState === 'number' && video.readyState < 2)) {
+            const isReadyToPlay = (seekConfirmed || Math.abs(video.currentTime - targetTime) <= 1) &&
+                !video.seeking &&
+                (typeof video.readyState !== 'number' || video.readyState >= 2);
+
+            // 关键保护 1：如果视频已经跳转并缓冲就绪，且尚未发起过播放（playAttempts === 0），
+            // 绝不能因为后台/锁屏节流期间自然时钟越过了超时阈值而直接误杀，必须立即执行播放！
+            if (isReadyToPlay && playAttempts === 0) {
+                playAttempts++;
+                const id = ++requestId;
+                try {
+                    Promise.resolve(video.play()).then(() => {
+                        if (!isPending() || id !== requestId) return;
+                        if (video.paused || video.seeking) {
+                            retry(new Error('播放器尚未进入播放状态'), id);
+                        } else {
+                            finish();
+                        }
+                    }, error => retry(error, id));
+                    setManagedTimeout(() => retry(new Error('播放请求等待超时'), id), 4000);
+                } catch (error) {
+                    retry(error, id);
+                }
+                return;
+            }
+
+            // 关键保护 2：后台/锁屏状态下，Chromium 定时器会被强制压制为 60 秒一次。
+            // 若处于隐藏状态，放宽等待时间阈值（至少 180 秒且不少于 3 次轮询），避免唤醒第一枪瞬间超时。
+            const isMinimized = !!(state.isCurrentlyMinimized || state.minimizedAt);
+            const effectiveTimeout = isMinimized
+                ? Math.max(CONFIG.replayStartTimeout, 180000)
+                : CONFIG.replayStartTimeout;
+
+            if (Date.now() - startedAt >= effectiveTimeout && (pollCount >= 3 || !isMinimized)) {
+                fail(`回退后恢复播放超时${lastError ? ` (${lastError})` : ''}`);
+                return;
+            }
+
+            if (!isReadyToPlay) {
                 setManagedTimeout(waitAndPlay, 500);
                 return;
             }
+
             playAttempts++;
             const id = ++requestId;
             try {

@@ -92,7 +92,7 @@ function setup(initialStorage = [], initialLocalStorage = [], shared = {}) {
     };
     vm.createContext(context);
     const source = fs.readFileSync(path.join(__dirname, 'pc.js'), 'utf8');
-    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare, handleMinimizationChange, formatMinimizationDuration, getHUDElement, createHUD }; })();'), context);
+    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare, handleMinimizationChange, formatMinimizationDuration, getHUDElement, createHUD, startAudioKeepAlive, stopAudioKeepAlive, isAudioKeepAliveActive }; })();'), context);
     timers.clear(); // 初始化主循环由测试显式调用。
     function advance(ms) {
         const end = now + ms;
@@ -2672,4 +2672,60 @@ test('[防最小化 3] 窗口从最小化恢复后更新看门狗时间戳并提
 
     assert.ok(t.state.minimizedAlertText.includes('1 分 5 秒'));
     assert.ok(t.state.lastMinimizationRestoredAt > 0);
+});
+
+test('[Web Audio 保活] 启动时创建并运行极微声波振荡流，暂停时安全释放', () => {
+    const t = setup();
+    let started = false;
+    let stopped = false;
+    let closed = false;
+    class MockAudioContext {
+        constructor() { this.state = 'running'; this.destination = {}; }
+        createOscillator() {
+            return {
+                type: '', frequency: { value: 0 },
+                connect(dest) { this.dest = dest; },
+                start() { started = true; },
+                stop() { stopped = true; },
+                disconnect() {}
+            };
+        }
+        createGain() {
+            return {
+                gain: { value: 1 },
+                connect(dest) { this.dest = dest; }
+            };
+        }
+        close() { closed = true; this.state = 'closed'; return Promise.resolve(); }
+    }
+    t.context.window.AudioContext = MockAudioContext;
+    t.startAudioKeepAlive();
+    assert.equal(started, true);
+    assert.equal(t.isAudioKeepAliveActive(), true);
+
+    t.stopAudioKeepAlive();
+    assert.equal(stopped, true);
+    assert.equal(closed, true);
+    assert.equal(t.isAudioKeepAliveActive(), false);
+});
+
+test('[防锁屏超时误判] 后台/锁屏下重播只要视频缓冲就绪，即便墙上时钟跨越 60 秒也不误报超时并正常播放', async () => {
+    const t = setup();
+    t.state.enabled = true;
+    t.state.minimizedAt = t.context.Date.now() - 60000;
+    t.state.isCurrentlyMinimized = true;
+    t.fixture.video.currentTime = 70;
+    t.fixture.video.duration = 100;
+    t.fixture.video.seeking = false;
+    t.fixture.video.readyState = 4;
+    t.fixture.video.paused = true;
+
+    t.replayVideoTail(t.current);
+    // 模拟后台唤醒后首次触发 waitAndPlay：应立即调用 play() 并正常继续
+    t.advance(500);
+    await new Promise(resolve => setImmediate(resolve));
+
+    // 应该正常触发播放，绝不能在 playAttempts === 0 时直接误判超时暂停！
+    assert.equal(t.state.enabled, true, '不应因后台时钟跳跃而误判暂停');
+    assert.equal(t.fixture.video.plays > 0, true, '应成功调用 video.play() 恢复播放');
 });

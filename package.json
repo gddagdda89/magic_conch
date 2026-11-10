@@ -1,6 +1,6 @@
 {
   "name": "magic-conch-userscript",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "private": true,
   "scripts": {
     "build": "node build.cjs",
