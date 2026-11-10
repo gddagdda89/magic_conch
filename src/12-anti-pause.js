@@ -4,6 +4,69 @@
     let nativeHiddenGetter = null;
     let nativeVisibilityGetter = null;
 
+    // 只观察本页实际运行，不修改、补发或伪造平台心跳。
+    const backgroundHealth = { tickAt: null, gapMs: 0, video: null, time: 0,
+        progressAt: null, reportAt: null, epoch: null, recoveryPending: false };
+
+    function sampleBackgroundHealth() {
+        const now = Date.now();
+        if (!state.enabled || backgroundHealth.epoch !== getLocalItem(ACCOUNT_EPOCH_KEY, '')) {
+            Object.assign(backgroundHealth, { tickAt: null, gapMs: 0, video: null,
+                progressAt: null, reportAt: null, recoveryPending: false, epoch: getLocalItem(ACCOUNT_EPOCH_KEY, '') });
+            if (!state.enabled) return;
+        }
+        if (backgroundHealth.tickAt !== null) {
+            const gap = Math.max(0, now - backgroundHealth.tickAt);
+            if (gap > Math.max(10000, CONFIG.checkInterval * 5)) {
+                backgroundHealth.gapMs = Math.max(backgroundHealth.gapMs, gap);
+                backgroundHealth.recoveryPending = true;
+                diagnosticConsole.warn('后台诊断：调度出现间隔，待核对播放和平台记录。', { gapSeconds: Math.round(gap / 1000) });
+            }
+        }
+        backgroundHealth.tickAt = now;
+        const video = IS_JNFTC ? jnDocuments().map(doc => doc.querySelector('video,audio')).find(Boolean) : document.querySelector('video');
+        if (backgroundHealth.video !== video) {
+            backgroundHealth.video = video;
+            backgroundHealth.time = video?.currentTime || 0;
+            backgroundHealth.progressAt = null;
+            backgroundHealth.reportAt = null;
+        } else if (video && !video.seeking && video.currentTime > backgroundHealth.time + 0.5) {
+            backgroundHealth.progressAt = now;
+        }
+        backgroundHealth.time = video?.currentTime || 0;
+        // 资源记录仅表示观察到请求完成，不能证明服务器已接受学习记录。
+        if (IS_JNFTC && typeof performance !== 'undefined' && performance.getEntriesByType) {
+            const loginId = document.querySelector('#txtLoginInfoId')?.value;
+            if (loginId) for (const entry of performance.getEntriesByType('resource')) {
+                try {
+                    const url = new URL(entry.name, location.href);
+                    if (url.origin !== new URL(location.href).origin || !/\/SetTime\.ashx$/i.test(url.pathname) ||
+                        url.searchParams.get('LoginInfoId') !== loginId || !/^\d+$/.test(url.searchParams.get('pTime') || '')) continue;
+                    const at = performance.timeOrigin + entry.responseEnd;
+                    if (entry.responseEnd > 0 && Number.isFinite(at) && at <= now) backgroundHealth.reportAt = Math.max(backgroundHealth.reportAt || 0, at);
+                } catch (_) { /* 忽略不可识别的资源记录。 */ }
+            }
+        }
+    }
+
+    function backgroundHealthText() {
+        const now = Date.now();
+        const age = at => at === null ? '待确认' : `${Math.max(0, Math.floor((now - at) / 1000))}秒前`;
+        return `播放推进：${age(backgroundHealth.progressAt)}；平台上报请求：${age(backgroundHealth.reportAt)}（完成状态以平台为准）`;
+    }
+
+    function reconcileBackgroundRecovery() {
+        if (!backgroundHealth.recoveryPending || getNativeHidden() || !state.enabled) return;
+        backgroundHealth.recoveryPending = false;
+        // 保留原来的课程、重播次数和未完成操作，由正常流程核对登录、完成标记并恢复。
+        watchdogRuntime.lastProgressTimestamp = Date.now();
+        if (IS_JNFTC && jnProgress) jnProgress.suspended = true;
+        diagnosticConsole.log('后台恢复：重新核对当前页面，沿用原有播放、完成确认与有限重播流程。', {
+            gapSeconds: Math.round(backgroundHealth.gapMs / 1000),
+            paused: backgroundHealth.video?.paused, ended: backgroundHealth.video?.ended,
+        });
+    }
+
     function getNativeHidden() {
         try {
             if (typeof nativeHiddenGetter === 'function') return Boolean(nativeHiddenGetter());
@@ -32,6 +95,7 @@
 
         if (isHidden) {
             if (!state.minimizedAt) {
+                backgroundHealth.gapMs = 0;
                 state.minimizedAt = Date.now();
                 diagnosticConsole.log("【神奇海螺】检测到窗口进入最小化/后台隐藏状态...");
             }
@@ -50,16 +114,9 @@
                 // 仅当挂起 3 秒以上且处于运行状态时触发提示
                 if (durationSec >= 3 && state.enabled) {
                     const durText = formatMinimizationDuration(durationSec);
-                    const isAudioProtected = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
-                    if (isAudioProtected) {
-                        // 已经拥有后台防休眠发声豁免，免除浏览器后台节流，无需弹出刺眼的警告横幅
-                        state.minimizedAlertText = '';
-                        diagnosticConsole.log(`【神奇海螺】检测到窗口从后台恢复（后台约 ${durText}），后台防休眠持续生效中，心跳与定时器正常运行。`);
-                    } else {
-                        const alertMsg = `检测到窗口在后台约 ${durText}（后台防休眠尚未激活）。建议点击 HUD 激活防休眠胶囊，或保持窗口展开挂课。`;
-                        state.minimizedAlertText = alertMsg;
-                        diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从后台恢复（挂起约 ${durText}，防休眠未激活）。已在 HUD 提示激活防休眠！`);
-                    }
+                    backgroundHealth.recoveryPending = true;
+                    state.minimizedAlertText = `后台约 ${durText}，正在核对播放与学习记录。音频辅助不保证后台持续运行。`;
+                    diagnosticConsole.log(`后台恢复：${durText}；${backgroundHealthText()}`);
                     if (typeof updateHUD === 'function') {
                         updateHUD();
                     }

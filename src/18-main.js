@@ -4,6 +4,7 @@
     function mainLoop() {
         if (!syncAccountContext()) return;
         syncRetryEpoch();
+        sampleBackgroundHealth();
         if (typeof handleMinimizationChange === 'function' && !getNativeHidden() && state.minimizedAt) {
             handleMinimizationChange();
         }
@@ -13,6 +14,7 @@
         // 未手动启动时，不执行任何自动化逻辑（包括不自动弹窗确认、不自动播放、不自动跳转）
         if (!state.enabled) return;
         startAudioKeepAlive();
+        reconcileBackgroundRecovery();
 
         if (IS_JNFTC) { updateHUD(); return handleJnPlatform(); }
 

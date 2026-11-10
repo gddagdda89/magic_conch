@@ -1,6 +1,6 @@
     // ==========================================
     // 后台标签页 Worker 防休眠机制
-    // 利用独立 Web Worker 线程的心跳调度，彻底免疫 Chromium 对后台标签页的定时器节流降频
+    // 利用独立 Web Worker 辅助调度；后台冻结或系统睡眠仍可能中断运行
     // ==========================================
     function createWorkerInterval(callback, intervalMs) {
         const minInterval = Math.max(200, intervalMs || 2000);
@@ -81,8 +81,8 @@
 
     // ==========================================
     // Web Audio 后台防休眠机制
-    // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
-    // 产生真实 audible 发声特征，使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
+    // 利用 AudioContext 播放低音量振荡流作为辅助措施，
+    // 不根据音频状态推断视频推进、心跳成功或浏览器调度豁免。
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
@@ -95,7 +95,7 @@
         if (!hasLoggedRunning) {
             hasLoggedRunning = true;
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已激活 (AudioContext: running，增益 0.002@30Hz，已获浏览器调度豁免免除后台节流)');
+                diagnosticConsole.log('【神奇海螺】音频辅助保活已启动 (AudioContext: running；后台运行效果待实际观测)');
             }
             if (typeof updateHUD === 'function') {
                 updateHUD();
@@ -136,8 +136,8 @@
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
-                // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
-                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得发声豁免）
+                // 低音量辅助音频；效果受浏览器策略与音频输出设置影响，
+                // 30Hz 不保证不可闻，也不保证后台调度豁免。
                 gain.gain.value = 0.002;
                 osc.type = 'sine';
                 osc.frequency.value = 30;

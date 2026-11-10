@@ -92,7 +92,7 @@ function setup(initialStorage = [], initialLocalStorage = [], shared = {}) {
     };
     vm.createContext(context);
     const source = fs.readFileSync(path.join(__dirname, 'pc.js'), 'utf8');
-    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare, handleMinimizationChange, formatMinimizationDuration, getHUDElement, createHUD, startAudioKeepAlive, stopAudioKeepAlive, isAudioKeepAliveActive }; })();'), context);
+    vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'CONFIG.enableJitter = false; CONFIG.debugPlayback = true; window.testApi = { makeNativeFunction, enableLockStealth, enableStorageStealth, jnParseExamPlans, jnApplyExamPlan, jnSubmitRating, jnReportStudyTime, jnParseAnswers, jnAnswerQuestions, jnStartExam, jnHandleExam, syncAccountContext, readAccountIdentity, detectPlatform, jnRoot, jnUrl, jnReadTasks, jnReadVideos, jnHandleDuty, jnHandleCourse, jnHandlePlayer, handleJnPlatform, pauseJnPlayback, setJnContext: value => { jnContext = value; jnSave(); }, getJnContext: () => jnContext, isItemCompleted, getAllSubVideoItems, replayVideoTail, state, switchToNextSubVideoOrCourse, mainLoop, pauseAutomation, calculateCourseTotalProgress, detectCourseExam, getHandledCourses, markCourseHandled, isCourseHandled, getHandledMaps, markMapHandled, getCourseItems, autoDismissDialogs, updateHUD, simulateHumanClick, randomBetween, setManagedTimeout, STORAGE_KEYS, getStorageItem, setStorageItem, removeStorageItem, CONFIG, checkWatchdog, getWatchdogState, setWatchdogState, clearWatchdogState, markSubVideoFailed, isSubVideoFailed, getFailedSubVideos, watchdogRuntime, getConcurrencySetting, setConcurrencySetting, getActiveTabs, registerTabHeartbeat, unregisterTab, isCourseBusyByOtherTab, tryClaimCourseSlot, TAB_ID, waitForPageReady, recordDiagnostic, observeVideoPlayback, formatDiagnosticLogs, clearDiagnosticLogs, copyDiagnosticLogs, getCourseOutcomes, saveCourseOutcome, getCourseDisposition, getPlatformEntityId, getCurrentCourseId, getSubVideoKey, getCourseKeyFromItem, getTaskIdFromCard, getTaskSelection, saveTaskSelection, getTaskCatalog, saveTaskCatalog, loadTaskCatalog, pickNextTask, spawnTaskWorker, isTaskKeySelected, handleMyTaskPage, retrySkippedCourses, reconcileBeforeReplay, readPlatformLearningRecord, directoryDurationSeconds, createWorkerInterval, checkScriptUpdate, semverCompare, handleMinimizationChange, formatMinimizationDuration, getHUDElement, createHUD, startAudioKeepAlive, stopAudioKeepAlive, isAudioKeepAliveActive, sampleBackgroundHealth, backgroundHealthText, backgroundHealth, reconcileBackgroundRecovery }; })();'), context);
     timers.clear(); // 初始化主循环由测试显式调用。
     function advance(ms) {
         const end = now + ms;
@@ -2783,7 +2783,7 @@ test('[Web Audio 状态可靠上报] 处于 suspended 状态时绝不虚假上�
     assert.equal(currentFreq, 30, '振荡器频率必须符合 30Hz 超低频规范');
 
     const logsBefore = t.formatDiagnosticLogs();
-    assert.equal(logsBefore.includes('后台防休眠已激活'), false, '未真正 running 时绝不记录激活成功日志');
+    assert.equal(logsBefore.includes('音频辅助保活已启动'), false, '未真正 running 时绝不记录激活成功日志');
 
     // 模拟用户手势交互唤醒：派发 click 事件
     assert.ok(windowListeners['click']?.length > 0, '必须注册 click 手势监听器');
@@ -2795,7 +2795,7 @@ test('[Web Audio 状态可靠上报] 处于 suspended 状态时绝不虚假上�
     // 唤醒后状态变为 running，且记录日志
     assert.equal(t.isAudioKeepAliveActive(), true, '唤醒后 isAudioKeepAliveActive 必须为 true');
     const logsAfter = t.formatDiagnosticLogs();
-    assert.ok(logsAfter.includes('后台防休眠已激活'), '唤醒后应记录激活成功日志');
+    assert.ok(logsAfter.includes('音频辅助保活已启动'), '唤醒后应记录激活成功日志');
 });
 
 test('[金培整页跳转音频保活恢复] 金培整页跳转后 mainLoop 不被提前分支截断，能正常恢复音频保活', () => {
@@ -2828,7 +2828,7 @@ test('[金培整页跳转音频保活恢复] 金培整页跳转后 mainLoop 不�
     assert.equal(t.isAudioKeepAliveActive(), true, '金培页面整页跳转后保活状态必须为 true');
 });
 
-test('[后台防休眠激活时免除警告] 只要后台防休眠已激活，从最小化/后台恢复时绝不弹窗警告，HUD 保持干净清爽', () => {
+test('[后台恢复] 音频运行也不能证明学习心跳正常', () => {
     const t = setup();
     class RunningAudioContext {
         constructor() { this.state = 'running'; this.destination = {}; }
@@ -2846,9 +2846,9 @@ test('[后台防休眠激活时免除警告] 只要后台防休眠已激活，�
     t.handleMinimizationChange();
 
     // 防休眠生效时，绝不弹出刺眼的黄色警示条！
-    assert.equal(t.state.minimizedAlertText, '', '已激活后台防休眠时不应生成最小化警告横幅');
+    assert.match(t.state.minimizedAlertText, /正在核对/, '音频 running 仍需核对实际学习状态');
     const logs = t.formatDiagnosticLogs();
-    assert.ok(logs.includes('后台防休眠持续生效中'), '应记录安心的后台恢复正常推进日志');
+    assert.equal(logs.includes('心跳与定时器正常运行'), false, '没有观测证据不得报告心跳正常');
 });
 
 test('[后台防休眠胶囊状态指示与交互] 胶囊条在未激活时显示激活提示，激活后显示已生效绿色状态，支持点击触发激活', async () => {
@@ -2879,7 +2879,7 @@ test('[后台防休眠胶囊状态指示与交互] 胶囊条在未激活时显�
 
     // 未激活时应包含点击激活后台防休眠提示
     assert.match(hud.innerHTML, /id="jinpei-keepalive-badge"/);
-    assert.match(hud.innerHTML, /点击激活后台防休眠/);
+    assert.match(hud.innerHTML, /点击启动音频辅助保活/);
 
     // 点击该胶囊条触发激活
     const badge = t.getHUDElement('jinpei-keepalive-badge');
@@ -2889,5 +2889,61 @@ test('[后台防休眠胶囊状态指示与交互] 胶囊条在未激活时显�
 
     // 激活后胶囊条更新为已生效
     assert.equal(t.isAudioKeepAliveActive(), true);
-    assert.match(badge.innerHTML, /后台防休眠已生效/);
+    assert.match(badge.innerHTML, /音频辅助保活已启动/);
+});
+
+
+test('后台诊断发现长调度间隔，恢复不修改完成标记和重播次数', () => {
+    const t = setup();
+    t.state.enabled = true;
+    t.setMockVisibility(false, 'visible');
+    t.sampleBackgroundHealth();
+    t.advance(65000);
+    t.sampleBackgroundHealth();
+    assert.equal(t.backgroundHealth.gapMs, 65000);
+    assert.equal(t.backgroundHealth.recoveryPending, true);
+    t.reconcileBackgroundRecovery();
+    assert.equal(t.backgroundHealth.recoveryPending, false);
+    assert.equal(t.current.completed, false);
+    assert.equal(t.next.clicks, 0);
+    assert.equal(t.fixture.video.plays, 0);
+    assert.match(t.backgroundHealthText(), /播放推进：待确认/);
+    assert.match(t.backgroundHealthText(), /平台上报请求：待确认/);
+});
+
+test('后台诊断区分播放推进与上报，手动暂停后清空旧观测', () => {
+    const t = setup();
+    t.state.enabled = true;
+    t.sampleBackgroundHealth();
+    t.advance(2000);
+    t.fixture.video.currentTime = 2;
+    t.sampleBackgroundHealth();
+    assert.match(t.backgroundHealthText(), /播放推进：0秒前/);
+    assert.match(t.backgroundHealthText(), /平台上报请求：待确认/);
+    t.state.enabled = false;
+    t.sampleBackgroundHealth();
+    assert.equal(t.backgroundHealth.tickAt, null);
+    assert.equal(t.backgroundHealth.progressAt, null);
+});
+
+
+test('后台诊断只观察当前金培课件的同源上报，不将请求当作完成', () => {
+    const t = setup([], [], { url: 'https://jnftc.jnbank.com.cn/WebTraining14/Web/MyClass/OnLineRead.aspx' });
+    t.state.enabled = true;
+    const originalQuery = t.context.document.querySelector.bind(t.context.document);
+    t.context.document.querySelector = selector => selector === '#txtLoginInfoId' ? { value: 'current' } : originalQuery(selector);
+    let entries = [
+        { name: 'https://other.example/SetTime.ashx?LoginInfoId=current&pTime=60', responseEnd: 1000 },
+        { name: 'https://jnftc.jnbank.com.cn/SetTime.ashx?LoginInfoId=old&pTime=60', responseEnd: 1000 },
+    ];
+    t.context.performance = { timeOrigin: 0, getEntriesByType: () => entries };
+    t.advance(2000);
+    t.sampleBackgroundHealth();
+    assert.equal(t.backgroundHealth.reportAt, null);
+    entries.push({ name: 'https://jnftc.jnbank.com.cn/SetTime.ashx?LoginInfoId=current&pTime=60', responseEnd: 1000 });
+    t.sampleBackgroundHealth();
+    assert.equal(t.backgroundHealth.reportAt, 1000);
+    assert.match(t.backgroundHealthText(), /上报请求：1秒前/);
+    assert.equal(t.current.completed, false);
+    assert.equal(t.next.clicks, 0);
 });

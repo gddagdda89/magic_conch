@@ -163,9 +163,11 @@
                     border: 1px solid rgba(245, 158, 11, 0.35);
                     color: #b45309;
                     cursor: pointer;
-                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！">
-                    <span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>
+                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处尝试启动音频辅助保活。">
+                    <span>⚡</span> <span>点击启动音频辅助保活</span>
                 </div>
+
+                <div id="jinpei-background-health" style="font-size:10px;color:#64748b;line-height:1.5;white-space:normal;margin-bottom:8px;"></div>
 
                 <!-- 浅色磨砂信息栏 -->
                 <div class="jinpei-info-box" style="
@@ -724,26 +726,33 @@
     function updateKeepAliveBadge() {
         const badge = getHUDElement('jinpei-keepalive-badge');
         if (!badge) return;
+        const healthRow = getHUDElement('jinpei-background-health');
+        if (healthRow) healthRow.style.display = state.enabled ? 'block' : 'none';
         if (!state.enabled) {
             badge.style.display = 'none';
             return;
         }
         badge.style.display = 'flex';
+        const healthText = backgroundHealthText();
+        const healthEl = getHUDElement('jinpei-background-health');
+        if (healthEl) healthEl.innerText = healthText;
         const isActive = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
         if (isActive) {
             badge.style.background = 'rgba(16, 185, 129, 0.08)';
             badge.style.border = '1px solid rgba(16, 185, 129, 0.25)';
             badge.style.color = '#059669';
             badge.style.cursor = 'default';
-            badge.title = '后台防休眠已全速生效：已获浏览器发声调度豁免，可放心最小化或切到后台虚拟桌面';
-            badge.innerHTML = '<span>🟢</span> <span>后台防休眠已生效（全频运行 · 可放心最小化）</span>';
+            badge.title = '音频辅助已启动；不能保证最小化、锁屏或系统睡眠时继续运行';
+            badge.innerHTML = '<span>🟢</span> <span>音频辅助保活已启动</span>';
+            badge.title += '；' + healthText;
         } else {
             badge.style.background = 'rgba(245, 158, 11, 0.1)';
             badge.style.border = '1px solid rgba(245, 158, 11, 0.35)';
             badge.style.color = '#b45309';
             badge.style.cursor = 'pointer';
-            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！';
-            badge.innerHTML = '<span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>';
+            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处尝试启动音频辅助保活。';
+            badge.innerHTML = '<span>⚡</span> <span>点击启动音频辅助保活</span>';
+            badge.title += '；' + healthText;
         }
     }
 

@@ -993,7 +993,7 @@ function getStorageItem(keyName, legacyKey) {
 
 // ==========================================
     // 后台标签页 Worker 防休眠机制
-    // 利用独立 Web Worker 线程的心跳调度，彻底免疫 Chromium 对后台标签页的定时器节流降频
+    // 利用独立 Web Worker 辅助调度；后台冻结或系统睡眠仍可能中断运行
     // ==========================================
     function createWorkerInterval(callback, intervalMs) {
         const minInterval = Math.max(200, intervalMs || 2000);
@@ -1074,8 +1074,8 @@ function getStorageItem(keyName, legacyKey) {
 
     // ==========================================
     // Web Audio 后台防休眠机制
-    // 利用 AudioContext 播放极微声波振荡流（符合 Chrome 88 官方规范，高于 -60 dB 判定线），
-    // 产生真实 audible 发声特征，使 Chromium 调度器全面豁免锁屏与后台定时器节流（Timer Throttling）
+    // 利用 AudioContext 播放低音量振荡流作为辅助措施，
+    // 不根据音频状态推断视频推进、心跳成功或浏览器调度豁免。
     // ==========================================
     let keepAliveAudioCtx = null;
     let keepAliveOscillator = null;
@@ -1088,7 +1088,7 @@ function getStorageItem(keyName, legacyKey) {
         if (!hasLoggedRunning) {
             hasLoggedRunning = true;
             if (typeof diagnosticConsole !== 'undefined' && typeof diagnosticConsole.log === 'function') {
-                diagnosticConsole.log('【神奇海螺】Web Audio 后台防休眠已激活 (AudioContext: running，增益 0.002@30Hz，已获浏览器调度豁免免除后台节流)');
+                diagnosticConsole.log('【神奇海螺】音频辅助保活已启动 (AudioContext: running；后台运行效果待实际观测)');
             }
             if (typeof updateHUD === 'function') {
                 updateHUD();
@@ -1129,8 +1129,8 @@ function getStorageItem(keyName, legacyKey) {
             if (!keepAliveOscillator) {
                 const osc = keepAliveAudioCtx.createOscillator();
                 const gain = keepAliveAudioCtx.createGain();
-                // 增益 0.002（约 -54 dBFS）高于 Chromium 静音门限（-60 dBFS），
-                // 搭配 30Hz 超低频（人耳完全不可闻，但在浏览器音频流中持续产生 RMS 能量，稳定获得发声豁免）
+                // 低音量辅助音频；效果受浏览器策略与音频输出设置影响，
+                // 30Hz 不保证不可闻，也不保证后台调度豁免。
                 gain.gain.value = 0.002;
                 osc.type = 'sine';
                 osc.frequency.value = 30;
@@ -1835,9 +1835,11 @@ function createHUD() {
                     border: 1px solid rgba(245, 158, 11, 0.35);
                     color: #b45309;
                     cursor: pointer;
-                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！">
-                    <span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>
+                " title="受浏览器安全策略限制，新页面需要一次用户手势。点击此处尝试启动音频辅助保活。">
+                    <span>⚡</span> <span>点击启动音频辅助保活</span>
                 </div>
+
+                <div id="jinpei-background-health" style="font-size:10px;color:#64748b;line-height:1.5;white-space:normal;margin-bottom:8px;"></div>
 
                 <!-- 浅色磨砂信息栏 -->
                 <div class="jinpei-info-box" style="
@@ -2396,26 +2398,33 @@ function createHUD() {
     function updateKeepAliveBadge() {
         const badge = getHUDElement('jinpei-keepalive-badge');
         if (!badge) return;
+        const healthRow = getHUDElement('jinpei-background-health');
+        if (healthRow) healthRow.style.display = state.enabled ? 'block' : 'none';
         if (!state.enabled) {
             badge.style.display = 'none';
             return;
         }
         badge.style.display = 'flex';
+        const healthText = backgroundHealthText();
+        const healthEl = getHUDElement('jinpei-background-health');
+        if (healthEl) healthEl.innerText = healthText;
         const isActive = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
         if (isActive) {
             badge.style.background = 'rgba(16, 185, 129, 0.08)';
             badge.style.border = '1px solid rgba(16, 185, 129, 0.25)';
             badge.style.color = '#059669';
             badge.style.cursor = 'default';
-            badge.title = '后台防休眠已全速生效：已获浏览器发声调度豁免，可放心最小化或切到后台虚拟桌面';
-            badge.innerHTML = '<span>🟢</span> <span>后台防休眠已生效（全频运行 · 可放心最小化）</span>';
+            badge.title = '音频辅助已启动；不能保证最小化、锁屏或系统睡眠时继续运行';
+            badge.innerHTML = '<span>🟢</span> <span>音频辅助保活已启动</span>';
+            badge.title += '；' + healthText;
         } else {
             badge.style.background = 'rgba(245, 158, 11, 0.1)';
             badge.style.border = '1px solid rgba(245, 158, 11, 0.35)';
             badge.style.color = '#b45309';
             badge.style.cursor = 'pointer';
-            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处可瞬间激活后台防休眠！';
-            badge.innerHTML = '<span>⚡</span> <span>点击激活后台防休眠（免疫挂机降频）</span>';
+            badge.title = '受浏览器安全策略限制，新页面需要一次用户手势。点击此处尝试启动音频辅助保活。';
+            badge.innerHTML = '<span>⚡</span> <span>点击启动音频辅助保活</span>';
+            badge.title += '；' + healthText;
         }
     }
 
@@ -2600,6 +2609,69 @@ function createHUD() {
     let nativeHiddenGetter = null;
     let nativeVisibilityGetter = null;
 
+    // 只观察本页实际运行，不修改、补发或伪造平台心跳。
+    const backgroundHealth = { tickAt: null, gapMs: 0, video: null, time: 0,
+        progressAt: null, reportAt: null, epoch: null, recoveryPending: false };
+
+    function sampleBackgroundHealth() {
+        const now = Date.now();
+        if (!state.enabled || backgroundHealth.epoch !== getLocalItem(ACCOUNT_EPOCH_KEY, '')) {
+            Object.assign(backgroundHealth, { tickAt: null, gapMs: 0, video: null,
+                progressAt: null, reportAt: null, recoveryPending: false, epoch: getLocalItem(ACCOUNT_EPOCH_KEY, '') });
+            if (!state.enabled) return;
+        }
+        if (backgroundHealth.tickAt !== null) {
+            const gap = Math.max(0, now - backgroundHealth.tickAt);
+            if (gap > Math.max(10000, CONFIG.checkInterval * 5)) {
+                backgroundHealth.gapMs = Math.max(backgroundHealth.gapMs, gap);
+                backgroundHealth.recoveryPending = true;
+                diagnosticConsole.warn('后台诊断：调度出现间隔，待核对播放和平台记录。', { gapSeconds: Math.round(gap / 1000) });
+            }
+        }
+        backgroundHealth.tickAt = now;
+        const video = IS_JNFTC ? jnDocuments().map(doc => doc.querySelector('video,audio')).find(Boolean) : document.querySelector('video');
+        if (backgroundHealth.video !== video) {
+            backgroundHealth.video = video;
+            backgroundHealth.time = video?.currentTime || 0;
+            backgroundHealth.progressAt = null;
+            backgroundHealth.reportAt = null;
+        } else if (video && !video.seeking && video.currentTime > backgroundHealth.time + 0.5) {
+            backgroundHealth.progressAt = now;
+        }
+        backgroundHealth.time = video?.currentTime || 0;
+        // 资源记录仅表示观察到请求完成，不能证明服务器已接受学习记录。
+        if (IS_JNFTC && typeof performance !== 'undefined' && performance.getEntriesByType) {
+            const loginId = document.querySelector('#txtLoginInfoId')?.value;
+            if (loginId) for (const entry of performance.getEntriesByType('resource')) {
+                try {
+                    const url = new URL(entry.name, location.href);
+                    if (url.origin !== new URL(location.href).origin || !/\/SetTime\.ashx$/i.test(url.pathname) ||
+                        url.searchParams.get('LoginInfoId') !== loginId || !/^\d+$/.test(url.searchParams.get('pTime') || '')) continue;
+                    const at = performance.timeOrigin + entry.responseEnd;
+                    if (entry.responseEnd > 0 && Number.isFinite(at) && at <= now) backgroundHealth.reportAt = Math.max(backgroundHealth.reportAt || 0, at);
+                } catch (_) { /* 忽略不可识别的资源记录。 */ }
+            }
+        }
+    }
+
+    function backgroundHealthText() {
+        const now = Date.now();
+        const age = at => at === null ? '待确认' : `${Math.max(0, Math.floor((now - at) / 1000))}秒前`;
+        return `播放推进：${age(backgroundHealth.progressAt)}；平台上报请求：${age(backgroundHealth.reportAt)}（完成状态以平台为准）`;
+    }
+
+    function reconcileBackgroundRecovery() {
+        if (!backgroundHealth.recoveryPending || getNativeHidden() || !state.enabled) return;
+        backgroundHealth.recoveryPending = false;
+        // 保留原来的课程、重播次数和未完成操作，由正常流程核对登录、完成标记并恢复。
+        watchdogRuntime.lastProgressTimestamp = Date.now();
+        if (IS_JNFTC && jnProgress) jnProgress.suspended = true;
+        diagnosticConsole.log('后台恢复：重新核对当前页面，沿用原有播放、完成确认与有限重播流程。', {
+            gapSeconds: Math.round(backgroundHealth.gapMs / 1000),
+            paused: backgroundHealth.video?.paused, ended: backgroundHealth.video?.ended,
+        });
+    }
+
     function getNativeHidden() {
         try {
             if (typeof nativeHiddenGetter === 'function') return Boolean(nativeHiddenGetter());
@@ -2628,6 +2700,7 @@ function createHUD() {
 
         if (isHidden) {
             if (!state.minimizedAt) {
+                backgroundHealth.gapMs = 0;
                 state.minimizedAt = Date.now();
                 diagnosticConsole.log("【神奇海螺】检测到窗口进入最小化/后台隐藏状态...");
             }
@@ -2646,16 +2719,9 @@ function createHUD() {
                 // 仅当挂起 3 秒以上且处于运行状态时触发提示
                 if (durationSec >= 3 && state.enabled) {
                     const durText = formatMinimizationDuration(durationSec);
-                    const isAudioProtected = typeof isAudioKeepAliveActive === 'function' && isAudioKeepAliveActive();
-                    if (isAudioProtected) {
-                        // 已经拥有后台防休眠发声豁免，免除浏览器后台节流，无需弹出刺眼的警告横幅
-                        state.minimizedAlertText = '';
-                        diagnosticConsole.log(`【神奇海螺】检测到窗口从后台恢复（后台约 ${durText}），后台防休眠持续生效中，心跳与定时器正常运行。`);
-                    } else {
-                        const alertMsg = `检测到窗口在后台约 ${durText}（后台防休眠尚未激活）。建议点击 HUD 激活防休眠胶囊，或保持窗口展开挂课。`;
-                        state.minimizedAlertText = alertMsg;
-                        diagnosticConsole.warn(`【神奇海螺】⚠️ 检测到窗口从后台恢复（挂起约 ${durText}，防休眠未激活）。已在 HUD 提示激活防休眠！`);
-                    }
+                    backgroundHealth.recoveryPending = true;
+                    state.minimizedAlertText = `后台约 ${durText}，正在核对播放与学习记录。音频辅助不保证后台持续运行。`;
+                    diagnosticConsole.log(`后台恢复：${durText}；${backgroundHealthText()}`);
                     if (typeof updateHUD === 'function') {
                         updateHUD();
                     }
@@ -5344,6 +5410,7 @@ let jnReportPromise = null;
     function mainLoop() {
         if (!syncAccountContext()) return;
         syncRetryEpoch();
+        sampleBackgroundHealth();
         if (typeof handleMinimizationChange === 'function' && !getNativeHidden() && state.minimizedAt) {
             handleMinimizationChange();
         }
@@ -5353,6 +5420,7 @@ let jnReportPromise = null;
         // 未手动启动时，不执行任何自动化逻辑（包括不自动弹窗确认、不自动播放、不自动跳转）
         if (!state.enabled) return;
         startAudioKeepAlive();
+        reconcileBackgroundRecovery();
 
         if (IS_JNFTC) { updateHUD(); return handleJnPlatform(); }
 
